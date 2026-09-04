@@ -40,4 +40,23 @@ test("DeepSeek preset uses the official Responses integration", () => {
   assert.equal(preset.model, "deepseek-v4-flash");
   assert.deepEqual(preset.modelList, ["deepseek-v4-flash", "deepseek-v4-pro"]);
 });
+
+test("Apinoria preset uses the OpenAI-compatible Responses endpoint", () => {
+  const preset = PRESETS.find((candidate) => candidate.id === "apinoria");
+  assert.ok(preset);
+  assert.equal(preset.name, "派诺云");
+  assert.equal(preset.category, "aggregator");
+  assert.equal(preset.baseUrl, "https://api.apinoria.com/v1");
+  assert.equal(preset.websiteUrl, "https://www.apinoria.com");
+  assert.equal(preset.apiKeyUrl, "https://www.apinoria.com/keys");
+  assert.equal(preset.protocol, "responses");
+  assert.equal(preset.model, "gpt-5.6-luna");
+  assert.deepEqual(preset.modelList, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
+});
+
+test("Apinoria is the first aggregator preset", () => {
+  const firstAggregator = PRESETS.find((candidate) => candidate.category === "aggregator");
+  assert.ok(firstAggregator);
+  assert.equal(firstAggregator.id, "apinoria");
+});
 });
