@@ -232,7 +232,7 @@ fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
     assert!(app_tsx.contains("onClick={createNewAggregateProfile}"));
     assert!(app_tsx.contains("已打开聚合供应商详情"));
     assert!(app_tsx.contains(
-        "buildRelayConfigToml(profile, { includeBearerToken: false, requiresOpenAiAuth: true })"
+        "requiresOpenAiAuth: profile.relayMode !== \"pureApi\","
     ));
     assert!(
         app_tsx.contains(

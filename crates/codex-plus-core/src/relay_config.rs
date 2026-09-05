@@ -2917,13 +2917,27 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
     {
         provider["wire_api"] = toml_edit::value("responses");
     }
-    if profile.relay_mode != crate::settings::RelayMode::PureApi
-        && provider
-            .get("requires_openai_auth")
-            .and_then(Item::as_bool)
-            .is_none()
-    {
+    if profile.relay_mode == crate::settings::RelayMode::PureApi {
+        // 纯 API 中转站：文生图等本地扩展调用不走 OpenAI 登录态，requires_openai_auth
+        // 必须显式为 false（模板遗留的 true 也要覆盖），并按 Owner 确认的形态写入
+        // http_headers（x-openai-actor-authorization + x-api-key），codex 才会把
+        // 图像生成请求指向中转站。API key 从本地既有凭据（auth.json 存档）读取。
+        provider["requires_openai_auth"] = toml_edit::value(false);
+        if !api_key.trim().is_empty() {
+            let mut headers = toml_edit::InlineTable::new();
+            headers.insert(
+                "x-openai-actor-authorization",
+                toml_edit::Value::from("local-image-extension"),
+            );
+            headers.insert("x-api-key", toml_edit::Value::from(api_key.trim()));
+            provider["http_headers"] = toml_edit::value(headers);
+        }
+    } else {
+        // 官方/混合/聚合模式必须走 OpenAI 登录态：无条件覆盖为 true（包括纯 API
+        // 阶段遗留的 false），并移除纯 API 阶段遗留的文生图 http_headers，
+        // 避免旧中转站 key 被发送到新端点（与混合快捷注入路径行为对齐）。
         provider["requires_openai_auth"] = toml_edit::value(true);
+        provider.remove("http_headers");
     }
     let provider_base_url = if profile.has_model_routes() || profile.uses_no_auth() {
         crate::protocol_proxy::local_responses_proxy_base_url(
@@ -3593,6 +3607,136 @@ cwd = \"/tmp\"
         assert!(auth.contains("OPENAI_API_KEY"));
     }
 
+    /// RUYI-64 回归：中转站（纯 API）profile 的模板可能带 `requires_openai_auth = true`
+    ///（历史预设/前端模板遗留），该形态会让 codex 用 OpenAI 登录态请求文生图而失败。
+    /// apply 时必须覆盖为 `false`，并按 Owner 确认形态写入 `http_headers`
+    ///（`x-openai-actor-authorization` + `x-api-key`），API key 从本地既有凭据（auth.json
+    /// 存档）读取。
+    #[test]
+    fn pure_api_profile_apply_overrides_openai_auth_and_writes_image_gen_headers() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = RelayProfile {
+            id: "apinoria".to_string(),
+            name: "派诺云".to_string(),
+            base_url: "https://api.apinoria.com/v1".to_string(),
+            upstream_base_url: "https://api.apinoria.com/v1".to_string(),
+            model: "gpt-5.6-luna".to_string(),
+            relay_mode: crate::settings::RelayMode::PureApi,
+            protocol: crate::settings::RelayProtocol::Responses,
+            config_contents: "model = \"gpt-5.6-luna\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://api.apinoria.com/v1\"\n"
+                .to_string(),
+            auth_contents: "{\"OPENAI_API_KEY\":\"sk-test-placeholder\"}\n".to_string(),
+            ..RelayProfile::default()
+        };
+
+        let result =
+            apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+        assert!(result.configured);
+        let applied = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(applied.contains("requires_openai_auth = false"));
+        assert!(
+            !applied.contains("requires_openai_auth = true"),
+            "模板里的 true 必须被覆盖：{applied}"
+        );
+        let doc = applied.parse::<DocumentMut>().expect("必须仍是合法 TOML");
+        let headers = &doc["model_providers"]["custom"]["http_headers"];
+        assert_eq!(
+            headers["x-openai-actor-authorization"].as_str(),
+            Some("local-image-extension")
+        );
+        assert_eq!(headers["x-api-key"].as_str(), Some("sk-test-placeholder"));
+    }
+
+    /// RUYI-64 回归：profile 文件不完整时走快捷注入路径，同样必须写
+    /// `requires_openai_auth = false` + 文生图 `http_headers`。
+    #[test]
+    fn pure_api_quick_apply_writes_false_auth_and_image_gen_headers() {
+        let temp = tempfile::tempdir().unwrap();
+
+        apply_pure_api_config_to_home_with_session_provider(
+            temp.path(),
+            "https://api.apinoria.com/v1",
+            "sk-test-placeholder",
+            crate::settings::RelayProtocol::Responses,
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+            RelaySessionProvider::Custom,
+        )
+        .unwrap();
+
+        let applied = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(applied.contains("requires_openai_auth = false"));
+        let doc = applied.parse::<DocumentMut>().expect("必须仍是合法 TOML");
+        let headers = &doc["model_providers"]["custom"]["http_headers"];
+        assert_eq!(
+            headers["x-openai-actor-authorization"].as_str(),
+            Some("local-image-extension")
+        );
+        assert_eq!(headers["x-api-key"].as_str(), Some("sk-test-placeholder"));
+    }
+
+    /// 混合 API（官方登录 + 中转）模式不受影响：仍写 `requires_openai_auth = true`，
+    /// 且不得写入文生图 `http_headers`（该模式认证走 OpenAI 登录态）。
+    #[test]
+    fn mixed_relay_quick_apply_keeps_openai_auth_true_without_image_gen_headers() {
+        let temp = tempfile::tempdir().unwrap();
+
+        apply_relay_config_to_home_with_session_provider(
+            temp.path(),
+            "https://api.apinoria.com/v1",
+            "sk-test-placeholder",
+            crate::settings::RelayProtocol::Responses,
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+            RelaySessionProvider::Custom,
+        )
+        .unwrap();
+
+        let applied = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(applied.contains("requires_openai_auth = true"));
+        assert!(!applied.contains("http_headers"));
+        assert!(!applied.contains("x-api-key"));
+    }
+
+    /// 回归守卫：从纯 API 切回混合模式时，纯 API 阶段写入的
+    /// `requires_openai_auth = false` 与文生图 `http_headers` 必须被清除，
+    /// 不得残留（否则登录态判定错乱、旧 key 泄漏到新端点）。
+    #[test]
+    fn mixed_profile_apply_overrides_stale_pure_api_auth_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model = \"gpt-5.6-luna\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nbase_url = \"https://api.apinoria.com/v1\"\nhttp_headers = { \"x-openai-actor-authorization\" = \"local-image-extension\", \"x-api-key\" = \"sk-test-placeholder\" }\n",
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("auth.json"), "{}\n").unwrap();
+
+        let profile = RelayProfile {
+            id: "mixed-a".to_string(),
+            base_url: "https://relay.example/v1".to_string(),
+            api_key: "sk-new".to_string(),
+            relay_mode: crate::settings::RelayMode::MixedApi,
+            protocol: crate::settings::RelayProtocol::Responses,
+            config_contents:
+                "model = \"gpt-5.5\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nbase_url = \"https://relay.example/v1\"\n"
+                    .to_string(),
+            auth_contents: "{\"OPENAI_API_KEY\":\"sk-new\"}\n".to_string(),
+            ..RelayProfile::default()
+        };
+
+        apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+        let applied = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(applied.contains("requires_openai_auth = true"));
+        assert!(
+            !applied.contains("requires_openai_auth = false"),
+            "纯 API 阶段的 false 必须被覆盖：{applied}"
+        );
+        assert!(
+            !applied.contains("http_headers"),
+            "纯 API 阶段的文生图 headers 必须被移除：{applied}"
+        );
+    }
+
     #[test]
     fn relay_profile_model_prefers_config_then_field_then_empty() {
         // 1. 供應商測試的回退第一級：config.toml 的 model = 優先
@@ -3682,6 +3826,17 @@ fn upsert_model_provider_config_with_session_provider(
     provider["wire_api"] = toml_edit::value("responses");
     if requires_openai_auth {
         provider["requires_openai_auth"] = toml_edit::value(true);
+    } else {
+        // 纯 API 快捷注入路径（profile 文件不完整时）：显式关闭 OpenAI 登录态，
+        // 并按 Owner 确认形态写入文生图所需 http_headers。
+        provider["requires_openai_auth"] = toml_edit::value(false);
+        let mut headers = toml_edit::InlineTable::new();
+        headers.insert(
+            "x-openai-actor-authorization",
+            toml_edit::Value::from("local-image-extension"),
+        );
+        headers.insert("x-api-key", toml_edit::Value::from(bearer_token));
+        provider["http_headers"] = toml_edit::value(headers);
     }
     provider["base_url"] = toml_edit::value(base_url);
     provider["experimental_bearer_token"] = toml_edit::value(bearer_token);
