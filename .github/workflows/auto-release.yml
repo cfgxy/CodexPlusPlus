@@ -1,0 +1,82 @@
+name: Auto release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "可选：覆盖发布 tag（测试用，如 v0.0.0-test）；留空则按 Cargo.toml 版本号"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create release for workspace version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n '/^\[workspace\.package\]/,/^\[/ { s/^version = "\(.*\)"$/\1/p }' Cargo.toml | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "::error::无法从 Cargo.toml [workspace.package] 读取版本号"
+            exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "release tag: v$version"
+
+      - name: Decide release action
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag_name || steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过本次发布（版本号未变化时的重复 push 属预期）。"
+            echo "skip=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "refs/tags/$TAG"; then
+            echo "::error::tag $TAG 已存在但没有对应的 Release，请检查仓库状态，或升级 Cargo.toml 的 workspace 版本号后再发布。"
+            exit 1
+          fi
+          echo "skip=false" >> "$GITHUB_ENV"
+
+      - name: Create release
+        if: env.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag_name || steps.version.outputs.tag }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --repo "$REPO" --target "$SHA" --title "$TAG" --generate-notes
+          echo "Release $TAG 已创建。"
+
+      - name: Trigger asset build
+        if: env.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag_name || steps.version.outputs.tag }}
+          REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN 创建的 release 不会触发 release: published 事件，
+          # 因此这里显式派发 release-assets.yml；安装资产与 latest.json 由其构建上传。
+          gh workflow run release-assets.yml --repo "$REPO" --ref "$REF" -f tag_name="$TAG"
+          echo "已派发 release-assets.yml 构建 $TAG 的安装资产与 latest.json。"
