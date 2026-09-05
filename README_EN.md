@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/github/v/release/BigPizzaV3/CodexPlusPlus">
+  <img alt="Release" src="https://img.shields.io/github/v/release/cfgxy/CodexPlusPlus">
   <img alt="Stars" src="https://img.shields.io/github/stars/BigPizzaV3/CodexPlusPlus">
   <img alt="License" src="https://img.shields.io/github/license/BigPizzaV3/CodexPlusPlus">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
@@ -20,7 +20,7 @@ Codex++ is an external launcher and manager for the OpenAI Codex / ChatGPT deskt
 
 ## Quick Start
 
-Download the latest installer from [GitHub Releases](https://github.com/BigPizzaV3/CodexPlusPlus/releases):
+Download the latest installer from [GitHub Releases](https://github.com/cfgxy/CodexPlusPlus/releases):
 
 - Windows: `CodexPlusPlus-*-windows-x64-setup.exe`
 - macOS Intel: `CodexPlusPlus-*-macos-x64.dmg`
