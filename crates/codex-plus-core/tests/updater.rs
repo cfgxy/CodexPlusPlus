@@ -1,8 +1,86 @@
 use codex_plus_core::update::{
-    Release, download_asset_to, is_newer_version, parse_version_tag, release_from_github_payload,
-    release_from_latest_json_payload, safe_asset_name, select_update_asset,
+    DEFAULT_LATEST_JSON_URL, DEFAULT_REPOSITORY, Release, already_latest_check,
+    check_for_update_from, download_asset_to, is_newer_version, parse_version_tag,
+    release_from_github_payload, release_from_latest_json_payload, safe_asset_name,
+    select_update_asset,
 };
 use serde_json::json;
+
+#[test]
+fn default_update_source_points_to_cfgxy_repository() {
+    assert_eq!(DEFAULT_REPOSITORY, "cfgxy/CodexPlusPlus");
+    assert_eq!(
+        DEFAULT_LATEST_JSON_URL,
+        "https://github.com/cfgxy/CodexPlusPlus/releases/latest/download/latest.json"
+    );
+    // URL 与仓库常量必须同源，避免两处指向漂移。
+    assert!(DEFAULT_LATEST_JSON_URL.contains(&format!("github.com/{DEFAULT_REPOSITORY}/releases")));
+}
+
+#[test]
+fn already_latest_check_reports_no_update_without_latest_version() {
+    let check = already_latest_check("1.2.3");
+    assert_eq!(check.current_version, "1.2.3");
+    assert_eq!(check.latest_version, None);
+    assert!(!check.update_available);
+    assert_eq!(check.release_summary, "");
+    assert_eq!(check.asset_name, None);
+    assert_eq!(check.asset_url, None);
+}
+
+#[tokio::test]
+async fn check_for_update_from_reports_already_latest_when_release_missing() {
+    // GitHub 对尚无任何 Release 的仓库返回 404；检查必须得到「已是最新」而非报错。
+    let server = spawn_local_mock(
+        "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+    );
+
+    let check = check_for_update_from(&format!("http://{}/latest.json", server.addr), "1.0.0")
+        .await
+        .expect("missing release must not be an error");
+
+    assert!(!check.update_available);
+    assert_eq!(check.latest_version, None);
+    server.join();
+}
+
+#[tokio::test]
+async fn check_for_update_from_still_fails_on_server_errors() {
+    let server = spawn_local_mock(
+        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+    );
+
+    let result =
+        check_for_update_from(&format!("http://{}/latest.json", server.addr), "1.0.0").await;
+
+    assert!(result.is_err(), "non-404 failures must keep surfacing");
+    server.join();
+}
+
+/// 极简本地 HTTP mock：读净请求头后回一段固定响应，供离线验证更新检查行为。
+fn spawn_local_mock(response: &'static str) -> MockServer {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = std::thread::spawn(move || {
+        use std::io::{Read as _, Write as _};
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0u8; 1024];
+        let _ = stream.read(&mut request);
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    MockServer { addr, handle }
+}
+
+struct MockServer {
+    addr: std::net::SocketAddr,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl MockServer {
+    fn join(self) {
+        self.handle.join().unwrap();
+    }
+}
 
 #[test]
 fn parse_version_tag_accepts_prefix_and_suffix() {

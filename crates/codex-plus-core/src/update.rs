@@ -4,9 +4,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub const DEFAULT_REPOSITORY: &str = "BigPizzaV3/CodexPlusPlus";
+pub const DEFAULT_REPOSITORY: &str = "cfgxy/CodexPlusPlus";
 pub const DEFAULT_LATEST_JSON_URL: &str =
-    "https://github.com/BigPizzaV3/CodexPlusPlus/releases/latest/download/latest.json";
+    "https://github.com/cfgxy/CodexPlusPlus/releases/latest/download/latest.json";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -183,16 +183,53 @@ pub async fn fetch_latest_release(latest_json_url: &str) -> anyhow::Result<Relea
 }
 
 pub async fn check_for_update(current_version: &str) -> anyhow::Result<UpdateCheck> {
-    let release = fetch_latest_release(DEFAULT_LATEST_JSON_URL).await?;
-    let update_available = is_newer_version(&release.version, current_version)?;
-    Ok(UpdateCheck {
+    check_for_update_from(DEFAULT_LATEST_JSON_URL, current_version).await
+}
+
+pub async fn check_for_update_from(
+    latest_json_url: &str,
+    current_version: &str,
+) -> anyhow::Result<UpdateCheck> {
+    match fetch_latest_release(latest_json_url).await {
+        Ok(release) => {
+            let update_available = is_newer_version(&release.version, current_version)?;
+            Ok(UpdateCheck {
+                current_version: current_version.to_string(),
+                latest_version: Some(release.version),
+                release_summary: release.body,
+                asset_name: release.asset_name,
+                asset_url: release.asset_url,
+                update_available,
+            })
+        }
+        // GitHub 对尚无任何 Release 的仓库返回 404；这是新发布源的预期初始状态，
+        // 视作「已是最新」而非检查失败。其余错误（网络、5xx 等）照常上抛。
+        Err(error) if missing_release_status(status_of(&error)) => {
+            Ok(already_latest_check(current_version))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn already_latest_check(current_version: &str) -> UpdateCheck {
+    UpdateCheck {
         current_version: current_version.to_string(),
-        latest_version: Some(release.version),
-        release_summary: release.body,
-        asset_name: release.asset_name,
-        asset_url: release.asset_url,
-        update_available,
-    })
+        latest_version: None,
+        release_summary: String::new(),
+        asset_name: None,
+        asset_url: None,
+        update_available: false,
+    }
+}
+
+fn status_of(error: &anyhow::Error) -> Option<reqwest::StatusCode> {
+    error
+        .downcast_ref::<reqwest::Error>()
+        .and_then(reqwest::Error::status)
+}
+
+fn missing_release_status(status: Option<reqwest::StatusCode>) -> bool {
+    status == Some(reqwest::StatusCode::NOT_FOUND)
 }
 
 pub async fn perform_update(

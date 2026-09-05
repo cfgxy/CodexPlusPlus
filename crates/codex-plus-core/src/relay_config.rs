@@ -3562,6 +3562,38 @@ cwd = \"/tmp\"
     }
 
     #[test]
+    fn apinoria_pure_api_profile_switch_points_config_at_apinoria() {
+        // 模拟前端从「派诺云」预设创建供应商并切换：纯 API + Responses，
+        // config_contents 与 auth_contents 由界面按 baseUrl/apiKey 生成。
+        let temp = tempfile::tempdir().unwrap();
+        let profile = RelayProfile {
+            id: "apinoria".to_string(),
+            name: "派诺云".to_string(),
+            base_url: "https://api.apinoria.com/v1".to_string(),
+            upstream_base_url: "https://api.apinoria.com/v1".to_string(),
+            model: "gpt-5.6-luna".to_string(),
+            relay_mode: crate::settings::RelayMode::PureApi,
+            protocol: crate::settings::RelayProtocol::Responses,
+            config_contents: "model = \"gpt-5.6-luna\"\nmodel_provider = \"custom\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nrequires_openai_auth = true\nbase_url = \"https://api.apinoria.com/v1\"\n"
+                .to_string(),
+            auth_contents: "{\"OPENAI_API_KEY\":\"sk-test-placeholder\"}\n".to_string(),
+            ..RelayProfile::default()
+        };
+
+        let result =
+            apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
+
+        assert!(result.configured);
+        let applied = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(applied.contains("base_url = \"https://api.apinoria.com/v1\""));
+        assert!(applied.contains("model = \"gpt-5.6-luna\""));
+        assert!(applied.contains("model_provider = \"custom\""));
+        assert!(applied.contains("wire_api = \"responses\""));
+        let auth = std::fs::read_to_string(temp.path().join("auth.json")).unwrap();
+        assert!(auth.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
     fn relay_profile_model_prefers_config_then_field_then_empty() {
         // 1. 供應商測試的回退第一級：config.toml 的 model = 優先
         let from_config = RelayProfile {

@@ -174,6 +174,19 @@ export const PRESETS: ProviderPreset[] = [
 
   // ── 聚合/中转 ──
   {
+    // 派诺云：OpenAI 兼容接入点为 api.apinoria.com/v1，需绑定 OpenAI 平台类型
+    // 分组的 API Key；Codex 走 Responses API（官方接入文档推荐配置）。
+    id: "apinoria",
+    name: "派诺云",
+    websiteUrl: "https://www.apinoria.com",
+    apiKeyUrl: "https://www.apinoria.com/keys",
+    category: "aggregator",
+    baseUrl: "https://api.apinoria.com/v1",
+    protocol: "responses",
+    model: "gpt-5.6-luna",
+    modelList: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
+  },
+  {
     id: "jojocode",
     name: "JOJO Code",
     websiteUrl: "https://jojocode.com/",
