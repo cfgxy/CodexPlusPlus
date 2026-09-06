@@ -9,6 +9,14 @@ on:
         description: "Release tag to build assets for (e.g. v1.2.56)"
         required: true
         type: string
+  # 供 auto-release.yml 嵌套调用：GITHUB_TOKEN 无 actions:write，
+  # 无法用 workflow_dispatch API 派发本工作流（HTTP 403）。
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "Release tag to build assets for (e.g. v1.2.56)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -119,15 +127,21 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build macOS DMG
+        env:
+          TAG: ${{ inputs.tag_name || github.event.release.tag_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          VERSION="${TAG#v}"
           VERSION="${VERSION#V}"
           BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
 
       - name: Build macOS zip asset
         shell: bash
+        env:
+          TAG: ${{ inputs.tag_name || github.event.release.tag_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          VERSION="${TAG#v}"
           VERSION="${VERSION#V}"
           mkdir -p dist/macos/app-${{ matrix.arch }}
           cp "target/${{ matrix.target }}/release/codex-plus-plus" "dist/macos/app-${{ matrix.arch }}/"
