@@ -34,6 +34,31 @@ fn sponsors(payload: &Value) -> Vec<&Value> {
         .collect()
 }
 
+/// 仓库内 Apinoria 主图的路径与内容指纹。
+///
+/// 两条运行路径的图片都由 `include_bytes!` 编自这个文件，钉死 SHA256
+/// 才能证明用户看到的就是设计交付的那张图，而不是任意一张非空图片。
+const SPONSOR_BANNER_PATH: &str = "docs/images/sponsor-apinoria.png";
+const SPONSOR_BANNER_SHA256: &str =
+    "dc7e5e78e25939a15b21fae716b04c49587aeedc7ad167adb68f67d7f09970ec";
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// 从 `data:image/png;base64,...` 还原原始字节。
+fn decode_png_data_uri(value: &str, context: &str) -> Vec<u8> {
+    use base64::Engine;
+    let encoded = value
+        .strip_prefix("data:image/png;base64,")
+        .unwrap_or_else(|| panic!("{context}：图片不是 PNG data URI"));
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap_or_else(|error| panic!("{context}：data URI 无法解码：{error}"))
+}
+
 fn assert_sole_apinoria_sponsor(payload: &Value, context: &str) {
     let sponsors = sponsors(payload);
     let ids: Vec<&str> = sponsors
@@ -307,5 +332,65 @@ fn injection_script_enforces_the_same_sole_sponsor_rule() {
     assert!(
         script.contains("codexPlusAds = enforceCodexPlusSoleSponsor([]);"),
         "取数失败时赞助位会消失，赞助商展示是对外承诺"
+    );
+}
+
+#[test]
+fn sponsor_banner_asset_is_present_with_the_delivered_content() {
+    let path = repo_root().join(SPONSOR_BANNER_PATH);
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|error| panic!("读取 {} 失败：{error}", path.display()));
+    assert_eq!(
+        sha256_hex(&bytes),
+        SPONSOR_BANNER_SHA256,
+        "{SPONSOR_BANNER_PATH} 内容与设计交付的主图不一致"
+    );
+}
+
+#[test]
+fn rust_path_serves_the_repository_banner_bytes() {
+    // Rust 后端这条路径：normalize 输出的 Apinoria 条目必须带非空主图，
+    // 且解码后与仓库资产逐字节相同——空 image 会让赞助位在渲染端走兜底分支。
+    let payload = normalize_ad_payload(repository_ads_json());
+    let sponsor = sponsors(&payload)[0];
+    let image = sponsor
+        .get("image")
+        .and_then(Value::as_str)
+        .expect("Apinoria 条目缺少 image 字段");
+    assert!(!image.is_empty(), "Apinoria 主图为空，赞助位会缺图");
+    assert_eq!(
+        sha256_hex(&decode_png_data_uri(image, "Rust 取数路径")),
+        SPONSOR_BANNER_SHA256,
+        "Rust 路径的 Apinoria 主图与仓库资产不一致"
+    );
+}
+
+#[test]
+fn injection_script_carries_the_same_banner_bytes() {
+    // 注入脚本自己 normalize、不经 Rust，主图只能由注入变量送达。
+    // 两条路径解出同一个 SHA256，才谈得上「同源且可追溯」。
+    let script = codex_plus_core::assets::injection_script(57321);
+    let marker = "window.__CODEX_PLUS_APINORIA_BANNER__ = \"";
+    let start = script
+        .find(marker)
+        .expect("注入脚本未注入 Apinoria 主图变量")
+        + marker.len();
+    let rest = &script[start..];
+    let end = rest.find('"').expect("Apinoria 主图注入值未正常闭合");
+    let value = &rest[..end];
+    assert!(!value.is_empty(), "注入的 Apinoria 主图为空");
+    assert_eq!(
+        sha256_hex(&decode_png_data_uri(value, "注入脚本路径")),
+        SPONSOR_BANNER_SHA256,
+        "注入脚本的 Apinoria 主图与仓库资产不一致"
+    );
+    // 注入变量只有被实际读取才有意义。
+    assert!(
+        script.contains("String(window.__CODEX_PLUS_APINORIA_BANNER__ || \"\")"),
+        "注入脚本未读取 Apinoria 主图变量"
+    );
+    assert!(
+        script.contains("image: codexPlusSoleSponsorImage(),"),
+        "注入脚本的赞助位未使用该主图"
     );
 }

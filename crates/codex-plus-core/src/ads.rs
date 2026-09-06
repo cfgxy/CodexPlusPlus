@@ -14,6 +14,9 @@ const ERGOU_API_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-ergo
 const APIMART_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-apimart.png");
 const FENNO_AI_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-fenno-ai.png");
 const QINIU_AI_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-qiniu-ai.png");
+/// Apinoria 赞助位主图。`include_bytes!` 把资产编进二进制，赞助位不依赖
+/// 运行时能否访问远端图床——赞助商展示是对外承诺，不能因网络抖动缺图。
+const APINORIA_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-apinoria.png");
 const BUILTIN_SPONSOR_EXPIRES_AT: &str = "2026-08-02T23:59:59+08:00";
 const DEEPKEY_SPONSOR_EXPIRES_AT: &str = "2026-08-25T23:59:59+08:00";
 const APIMART_SPONSOR_EXPIRES_AT: &str = "2026-09-27T23:59:59+08:00";
@@ -107,6 +110,12 @@ fn host_belongs_to_sole_sponsor(host: &str) -> bool {
     host == SOLE_SPONSOR_HOST || host.ends_with(&format!(".{SOLE_SPONSOR_HOST}"))
 }
 
+/// 唯一赞助位主图的 data URI。注入脚本自己 normalize、不经 Rust，
+/// 只有把同一份 `include_bytes!` 资产喂过去，两条取数路径的图片才同源可追溯。
+pub fn sole_sponsor_image() -> String {
+    data_uri("image/png", APINORIA_IMAGE)
+}
+
 fn sole_sponsor() -> Value {
     let mut sponsor = Map::new();
     sponsor.insert("id".to_string(), json!(SOLE_SPONSOR_ID));
@@ -117,8 +126,7 @@ fn sole_sponsor() -> Value {
         json!("Codex++ 项目赞助商，提供稳定、价格合理的 API 中转服务。"),
     );
     sponsor.insert("url".to_string(), json!(SOLE_SPONSOR_URL));
-    // 暂无 Apinoria 品牌图，渲染端对空 image 有兜底分支；素材到位后补 data URI。
-    sponsor.insert("image".to_string(), json!(""));
+    sponsor.insert("image".to_string(), json!(sole_sponsor_image()));
     sponsor.insert(
         "highlights".to_string(),
         json!(["项目赞助商", "API 中转服务"]),

@@ -4016,6 +4016,13 @@
     return host === CODEX_PLUS_SOLE_SPONSOR_HOST || host.endsWith(`.${CODEX_PLUS_SOLE_SPONSOR_HOST}`);
   }
 
+  // 赞助位主图由 Rust 侧 injection_script_with_settings 注入，取的是
+  // crates/codex-plus-core/src/ads.rs 里同一份 include_bytes! 资产，
+  // 两条取数路径因此拿到同源、可追溯的同一张 banner。
+  function codexPlusSoleSponsorImage() {
+    return String(window.__CODEX_PLUS_APINORIA_BANNER__ || "");
+  }
+
   function enforceCodexPlusSoleSponsor(ads) {
     const rest = ads
       .filter((ad) => ad.id !== CODEX_PLUS_SOLE_SPONSOR_ID && !codexPlusUrlBelongsToSoleSponsor(ad.url))
@@ -4026,7 +4033,7 @@
       title: "派诺云",
       description: "Codex++ 项目赞助商，提供稳定、价格合理的 API 中转服务。",
       url: CODEX_PLUS_SOLE_SPONSOR_URL,
-      image: "",
+      image: codexPlusSoleSponsorImage(),
       expires_at: "",
       highlights: ["项目赞助商", "API 中转服务"],
     }, ...rest];

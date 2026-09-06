@@ -43,7 +43,17 @@ type AdsRuntime = {
   fetchedUrls: string[];
 };
 
-function adsRuntime(renderer: string, stub: FetchStub): AdsRuntime {
+// 赞助位 banner 由 Rust 侧 injection_script_with_settings 写进这个 window 变量，
+// 值取自 docs/images/sponsor-apinoria.png 的同一份 include_bytes! 资产。
+// 测试直接读这张图算出 data URI，最终 image 字段必须与它逐字节一致。
+async function sponsorBannerDataUrl() {
+  const bytes = await readFile(
+    new URL("../../../docs/images/sponsor-apinoria.png", import.meta.url),
+  );
+  return `data:image/png;base64,${bytes.toString("base64")}`;
+}
+
+function adsRuntime(renderer: string, stub: FetchStub, banner = ""): AdsRuntime {
   // 两段真实源码：分类段（常量 → normalize 结束）与取数段（缓存穿透 → fetch 结束）。
   const classification = sliceBetween(
     renderer,
@@ -60,12 +70,14 @@ function adsRuntime(renderer: string, stub: FetchStub): AdsRuntime {
   // renderCodexPlusAds 只在拿到面板节点时才被求值；桩 document 返回 null，
   // 因此不需要把渲染段一起切进来。
   const document = { querySelector: () => null };
+  const windowStub = { __CODEX_PLUS_APINORIA_BANNER__: banner };
   const create = new Function(
     "postJson",
     "fetch",
     "document",
     "sendCodexPlusDiagnostic",
     "recordFetchedUrl",
+    "window",
     `${classification}\n${fetching}\nreturn {
       enforceCodexPlusSoleSponsor,
       normalizeCodexPlusAds,
@@ -78,6 +90,7 @@ function adsRuntime(renderer: string, stub: FetchStub): AdsRuntime {
     documentValue: typeof document,
     sendCodexPlusDiagnostic: (event: string, detail: unknown) => void,
     recordFetchedUrl: (url: string) => void,
+    windowValue: typeof windowStub,
   ) => Omit<AdsRuntime, "diagnostics" | "fetchedUrls">;
 
   const runtime = create(
@@ -89,6 +102,7 @@ function adsRuntime(renderer: string, stub: FetchStub): AdsRuntime {
     document,
     (event, detail) => diagnostics.push({ event, detail }),
     (url: string) => fetchedUrls.push(url),
+    windowStub,
   );
   return { ...runtime, diagnostics, fetchedUrls };
 }
@@ -212,6 +226,36 @@ describe("注入脚本的赞助商分类行为", () => {
     );
     assert.equal(runtime.diagnostics.length, 1);
     assert.equal(runtime.diagnostics[0].event, "ads_fetch_failed");
+  });
+
+  it("赞助位主图取自 Rust 注入的 banner，与仓库资产逐字节一致", async () => {
+    const banner = await sponsorBannerDataUrl();
+    const runtime = adsRuntime(await readRenderer(), idleStub, banner);
+
+    const result = runtime.enforceCodexPlusSoleSponsor([]);
+
+    assert.equal(result[0].id, "apinoria");
+    assert.ok(result[0].image, "赞助位主图不能为空");
+    assert.equal(result[0].image, banner);
+  });
+
+  it("双源全部失败的兜底赞助位也带主图", async () => {
+    // 数据源抖动时赞助位仍要出现，缺图等于赞助商展示打折。
+    const banner = await sponsorBannerDataUrl();
+    const runtime = adsRuntime(
+      await readRenderer(),
+      {
+        postJson: async () => {
+          throw new Error("本地后端不可用");
+        },
+        fetch: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+      },
+      banner,
+    );
+
+    await runtime.fetchCodexPlusAds();
+
+    assert.equal(runtime.readAds()[0].image, banner);
   });
 
   it("本地后端已给出内容时不触发远端回退", async () => {
