@@ -19,9 +19,12 @@ const DEEPKEY_SPONSOR_EXPIRES_AT: &str = "2026-08-25T23:59:59+08:00";
 const APIMART_SPONSOR_EXPIRES_AT: &str = "2026-09-27T23:59:59+08:00";
 const NEW_SPONSOR_EXPIRES_AT: &str = "2026-11-27T23:59:59+08:00";
 
+/// 推荐内容数据源。两条都指向本仓库根的 ads.json：
+/// raw 是主源，拿到的是即时内容；jsDelivr 是同一文件的 CDN 镜像，作备用，
+/// 有缓存延迟，因此顺序不能颠倒——写反会让更新迟迟不生效。
 pub const DEFAULT_AD_LIST_URLS: [&str; 2] = [
-    "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-    "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
+    "https://raw.githubusercontent.com/cfgxy/CodexPlusPlus/main/ads.json",
+    "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/ads.json",
 ];
 
 pub fn normalize_ad_payload(payload: Value) -> Value {

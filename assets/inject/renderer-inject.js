@@ -4051,9 +4051,12 @@
   }
 
   async function directFetchCodexPlusAds() {
+    // 与 crates/codex-plus-core/src/ads.rs 的 DEFAULT_AD_LIST_URLS 保持一致：
+    // raw 为主源、jsDelivr 为备用源。两边改动必须同步，否则注入脚本与后端
+    // 会从不同仓库拉数据，同一台机器上显示的推荐内容不一致。
     const urls = [
-      "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-      "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
+      "https://raw.githubusercontent.com/cfgxy/CodexPlusPlus/main/ads.json",
+      "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/ads.json",
     ];
     let lastError = null;
     const cacheBust = Date.now();

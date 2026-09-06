@@ -2,21 +2,11 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use codex_plus_core::ads::{
-    DEFAULT_AD_LIST_URLS, cache_busted_ad_url, fetch_ad_list_from_urls, normalize_ad_payload,
-};
+use codex_plus_core::ads::{cache_busted_ad_url, fetch_ad_list_from_urls, normalize_ad_payload};
 use serde_json::json;
 
-#[test]
-fn default_ad_urls_match_legacy_helper_sources() {
-    assert_eq!(
-        DEFAULT_AD_LIST_URLS,
-        [
-            "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-            "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
-        ]
-    );
-}
+// 默认源地址的断言已迁到 tests/ads_source.rs：那里连同仓库内 ads.json 的
+// 可读性、规范化存活率和无凭据一起校验，比这里单钉一组字符串更能兜住真实失败。
 
 #[test]
 fn cache_busted_ad_url_appends_version_query_to_plain_url() {

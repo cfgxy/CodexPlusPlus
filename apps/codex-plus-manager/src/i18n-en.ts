@@ -368,8 +368,8 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。":
     "When off, this tool won't write Codex's config.toml / auth.json on manual switches; it never auto-modifies these files when launching Codex.",
   "兼容增强": "Compatible enhancement",
-  "内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。":
-    "Content comes from BigPizzaV3/Ad-List, split into sponsor recommendations and regular recommendations.",
+  "内容来自 cfgxy/CodexPlusPlus 仓库的 ads.json，分为赞助商推荐和普通推荐。":
+    "Content comes from ads.json in the cfgxy/CodexPlusPlus repository, split into sponsor recommendations and regular recommendations.",
   "内置": "Built-in",
   "内置、手动和市场安装脚本；可在这里启停或删除用户脚本": "Built-in, manual and marketplace-installed scripts; enable, disable or delete user scripts here",
   "内置和用户自定义脚本清单": "Built-in and user-defined script inventory",

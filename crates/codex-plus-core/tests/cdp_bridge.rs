@@ -830,7 +830,12 @@ fn injection_script_fetches_ads_without_bridge() {
     assert!(script.contains("directFetchCodexPlusAds"));
     assert!(script.contains("cacheBustCodexPlusAdUrl"));
     assert!(script.contains("Date.now()"));
-    assert!(script.contains("BigPizzaV3/Ad-List"));
+    // 注入脚本是与 Rust 后端并列的第二条取数路径，两边必须指向同一个源，
+    // 否则同一台机器上插件菜单和管理器会显示不同的推荐内容。
+    assert!(script.contains("https://raw.githubusercontent.com/cfgxy/CodexPlusPlus/main/ads.json"));
+    assert!(script.contains("https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/ads.json"));
+    // 只钉广告源，不牵连脚本里关于页的上游项目链接（那是另一回事）。
+    assert!(!script.contains("BigPizzaV3/Ad-List"));
     assert!(
         !script.contains("codexPlusAds = normalizeCodexPlusAds(await postJson(\"/ads\", {}));")
     );
