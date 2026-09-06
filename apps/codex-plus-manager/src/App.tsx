@@ -4111,23 +4111,23 @@ function OverviewScreen({
   const health = healthItems(overview);
   return (
     <>
-      <Panel className="jojocode-overview">
+      <Panel className="sponsor-overview">
         <CardContent>
-          <div className="jojocode-overview-layout">
-            <div className="jojocode-overview-main">
-              <div className="jojocode-overview-mark">
+          <div className="sponsor-overview-layout">
+            <div className="sponsor-overview-main">
+              <div className="sponsor-overview-mark">
                 <Network className="h-5 w-5" />
               </div>
               <div>
                 <span className="eyebrow">{t("项目赞助商")}</span>
-                <h2>JOJO Code</h2>
+                <h2>派诺云</h2>
                 <p>
-                  {t("JOJO Code 提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。")}
+                  {t("派诺云提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。")}
                 </p>
               </div>
             </div>
-            <div className="jojocode-overview-side">
-              <div className="jojocode-model-tags">
+            <div className="sponsor-overview-side">
+              <div className="sponsor-model-tags">
                 <span>GPT-5.6 全系列</span>
                 <span>Fable 5</span>
                 <span>Sonnet 5</span>
@@ -4137,9 +4137,9 @@ function OverviewScreen({
                 <span>Opus 4.7</span>
                 <span>gpt-image-2</span>
               </div>
-              <Button onClick={() => void actions.openExternalUrl("https://jojocode.com/")}>
+              <Button onClick={() => void actions.openExternalUrl("https://www.apinoria.com/")}>
                 <ExternalLink className="h-4 w-4" />
-                {t("打开 JOJO Code")}
+                {t("打开派诺云")}
               </Button>
             </div>
           </div>
