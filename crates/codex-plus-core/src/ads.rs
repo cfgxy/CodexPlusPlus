@@ -81,7 +81,30 @@ fn is_sole_sponsor(ad: &Value) -> bool {
     }
     ad.get("url")
         .and_then(Value::as_str)
-        .is_some_and(|url| url.contains(SOLE_SPONSOR_HOST))
+        .is_some_and(url_belongs_to_sole_sponsor)
+}
+
+/// 判断 URL 是否真的属于 Apinoria。
+///
+/// 必须解析出 host 再按域名边界比对，不能对整条 URL 做子串包含：
+/// `https://other.example/?source=apinoria.com`、`https://apinoria.com.example/`
+/// 和 `https://notapinoria.com/` 都含有这段文本，但都不是 Apinoria。
+/// 按子串判会把这些合法条目当成重复赞助位整条删掉，普通推荐凭空丢失。
+fn url_belongs_to_sole_sponsor(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    host_belongs_to_sole_sponsor(host)
+}
+
+/// 主域名本身或它的子域名才算命中；`notapinoria.com`、`apinoria.com.example`
+/// 都不满足「以 `.apinoria.com` 结尾」这条边界。
+fn host_belongs_to_sole_sponsor(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == SOLE_SPONSOR_HOST || host.ends_with(&format!(".{SOLE_SPONSOR_HOST}"))
 }
 
 fn sole_sponsor() -> Value {

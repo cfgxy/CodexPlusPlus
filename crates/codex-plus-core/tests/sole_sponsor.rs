@@ -181,6 +181,90 @@ fn apinoria_is_not_duplicated_when_remote_data_already_carries_it() {
     );
 }
 
+/// 仅在文本里包含 `apinoria.com`、但并不属于 Apinoria 的三类 URL。
+///
+/// 去重必须按解析出的 host 加域名边界判定：对整条 URL 做子串包含会把这些
+/// 合法推荐当成重复赞助位整条删掉，普通推荐凭空丢失。
+const NON_APINORIA_LOOKALIKE_URLS: [(&str, &str); 3] = [
+    (
+        "query-param-lookalike",
+        "https://other.example/?source=apinoria.com",
+    ),
+    ("suffix-domain-lookalike", "https://apinoria.com.example/"),
+    ("prefix-domain-lookalike", "https://notapinoria.com/"),
+];
+
+#[test]
+fn urls_merely_containing_the_sponsor_host_text_are_kept_and_demoted() {
+    let ads: Vec<Value> = NON_APINORIA_LOOKALIKE_URLS
+        .iter()
+        .map(|(id, url)| {
+            json!({
+                "id": id,
+                "type": "sponsor",
+                "title": format!("形似条目 {id}"),
+                "description": "URL 文本里含 apinoria.com，但并非 Apinoria",
+                "url": url
+            })
+        })
+        .collect();
+    let payload = normalize_ad_payload(json!({ "version": 1, "ads": ads }));
+    let normalized = payload["ads"].as_array().unwrap();
+
+    for (id, url) in NON_APINORIA_LOOKALIKE_URLS {
+        let ad = normalized
+            .iter()
+            .find(|ad| ad.get("id").and_then(Value::as_str) == Some(id))
+            .unwrap_or_else(|| panic!("{url} 并非 Apinoria，却被当成重复赞助位整条删除"));
+        assert_eq!(
+            ad.get("type").and_then(Value::as_str),
+            Some("normal"),
+            "{id} 应保留并降级为普通推荐"
+        );
+    }
+    assert_sole_apinoria_sponsor(&payload, "含形似 URL 的远端数据");
+}
+
+#[test]
+fn genuine_apinoria_subdomains_are_still_deduplicated() {
+    // 边界的另一侧：子域名确实属于 Apinoria，必须继续按重复项去掉，
+    // 否则「只保留真 Apinoria」会退化成「什么都不去重」。
+    let payload = normalize_ad_payload(json!({
+        "version": 1,
+        "ads": [
+            {
+                "id": "apinoria-www",
+                "type": "sponsor",
+                "title": "派诺云主站",
+                "description": "远端自带的主站条目",
+                "url": "https://www.apinoria.com/pricing"
+            },
+            {
+                "id": "apinoria-apex",
+                "type": "sponsor",
+                "title": "派诺云裸域",
+                "description": "远端自带的裸域条目",
+                "url": "https://apinoria.com/"
+            }
+        ]
+    }));
+
+    assert_sole_apinoria_sponsor(&payload, "远端自带 Apinoria 主站与裸域");
+    let ads = payload["ads"].as_array().unwrap();
+    assert_eq!(
+        ads.iter()
+            .filter(|ad| {
+                matches!(
+                    ad.get("id").and_then(Value::as_str),
+                    Some("apinoria-www" | "apinoria-apex")
+                )
+            })
+            .count(),
+        0,
+        "真正属于 Apinoria 的子域/裸域条目应作为重复项去掉"
+    );
+}
+
 #[test]
 fn apinoria_is_injected_even_when_remote_payload_is_unusable() {
     // 远端拉不到或整份数据被过滤光时，赞助位不能空着：

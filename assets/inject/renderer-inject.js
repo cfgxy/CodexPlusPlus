@@ -3994,15 +3994,31 @@
 
   const CODEX_PLUS_SOLE_SPONSOR_ID = "apinoria";
   const CODEX_PLUS_SOLE_SPONSOR_URL = "https://www.apinoria.com/";
+  const CODEX_PLUS_SOLE_SPONSOR_HOST = "apinoria.com";
 
   // 与 crates/codex-plus-core/src/ads.rs 的 install_sole_sponsor 同规则：
   // Apinoria 是唯一赞助商，其余全部降为普通推荐。这条路径自己 normalize、
   // 不经 Rust，只在后端强制会让插件菜单仍显示一排赞助商。
   // 降级而非删除——那些条目仍作普通推荐展示；先清掉既有 Apinoria 再插入，
   // 是防远端数据自带同一家时出现两个一模一样的赞助位。
+  // 与 Rust 的 url_belongs_to_sole_sponsor 同规则：解析出 host 再按域名边界比对。
+  // 不能对整条 URL 做子串包含——`https://other.example/?source=apinoria.com`、
+  // `https://apinoria.com.example/`、`https://notapinoria.com/` 都含这段文本却
+  // 都不是 Apinoria，按子串判会把合法推荐当重复赞助位整条删掉。
+  function codexPlusUrlBelongsToSoleSponsor(url) {
+    let host = "";
+    try {
+      host = new URL(String(url)).hostname;
+    } catch (error) {
+      return false;
+    }
+    host = host.replace(/\.+$/, "").toLowerCase();
+    return host === CODEX_PLUS_SOLE_SPONSOR_HOST || host.endsWith(`.${CODEX_PLUS_SOLE_SPONSOR_HOST}`);
+  }
+
   function enforceCodexPlusSoleSponsor(ads) {
     const rest = ads
-      .filter((ad) => ad.id !== CODEX_PLUS_SOLE_SPONSOR_ID && !ad.url.includes("apinoria.com"))
+      .filter((ad) => ad.id !== CODEX_PLUS_SOLE_SPONSOR_ID && !codexPlusUrlBelongsToSoleSponsor(ad.url))
       .map((ad) => ({ ...ad, type: "normal" }));
     return [{
       id: CODEX_PLUS_SOLE_SPONSOR_ID,
