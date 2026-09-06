@@ -1,9 +1,17 @@
 name: Release assets
 
+# 本工作流只构建并上传安装资产，不做陈旧资产清理，也不做最终集合验证——
+# 这两件事只实现在 auto-release.yml。因此这里刻意不保留任何可独立触发的入口：
+# 独立运行会成为绕过清理与验证的旁路，可能在残留错误资产（例如
+# CodexPlusPlus-main-macos-arm64.dmg）的情况下报告成功。
+#
+# 唯一入口是 auto-release.yml，它同时覆盖：
+#   - main push 自动发布
+#   - workflow_dispatch 手动为指定 tag 发布或补齐资产（含历史 tag 恢复）
+#
+# 也不使用 `release: published`：GITHUB_TOKEN 创建的 Release 本就不会发出该事件。
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
+  workflow_call:
     inputs:
       tag_name:
         description: "Release tag to build assets for (e.g. v1.2.56)"
@@ -20,7 +28,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
+          ref: ${{ inputs.tag_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,14 +62,14 @@ jobs:
       - name: Build Windows zip asset
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag_name || github.event.release.tag_name }}".TrimStart("v", "V")
+          $version = "${{ inputs.tag_name }}".TrimStart("v", "V")
           New-Item -ItemType Directory -Force dist/windows | Out-Null
           Compress-Archive -Path dist/windows/app/* -DestinationPath "dist/windows/CodexPlusPlus-$version-windows-x64.zip" -Force
 
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag_name || github.event.release.tag_name }}".TrimStart("v", "V")
+          $version = "${{ inputs.tag_name }}".TrimStart("v", "V")
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
           if (-not (Test-Path $makensis)) {
             $makensis = "makensis"
@@ -73,7 +81,7 @@ jobs:
       - name: Upload Windows installer
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag_name || github.event.release.tag_name }}
+          tag_name: ${{ inputs.tag_name }}
           files: |
             dist/windows/*.exe
             dist/windows/*.zip
@@ -95,7 +103,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
+          ref: ${{ inputs.tag_name }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -119,15 +127,21 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build macOS DMG
+        env:
+          TAG: ${{ inputs.tag_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          VERSION="${TAG#v}"
           VERSION="${VERSION#V}"
           BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
 
       - name: Build macOS zip asset
         shell: bash
+        env:
+          TAG: ${{ inputs.tag_name }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          VERSION="${TAG#v}"
           VERSION="${VERSION#V}"
           mkdir -p dist/macos/app-${{ matrix.arch }}
           cp "target/${{ matrix.target }}/release/codex-plus-plus" "dist/macos/app-${{ matrix.arch }}/"
@@ -151,7 +165,7 @@ jobs:
       - name: Upload macOS DMG
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag_name || github.event.release.tag_name }}
+          tag_name: ${{ inputs.tag_name }}
           files: |
             dist/macos/*.dmg
             dist/macos/*.zip
@@ -163,40 +177,34 @@ jobs:
       - windows-installer
       - macos-dmg
     steps:
+      # 需要仓库内的 scripts/release/generate-latest-json.mjs。
+      # 刻意不 checkout release tag：为历史 tag 补齐资产时，那个 tag 上可能
+      # 还没有本脚本（v1.2.57 即如此）。这里只用到生成逻辑（不依赖被发布的
+      # 源码），因此显式取调用方 auto-release.yml 所在的 commit——
+      # workflow_call 下 github.sha 就是它，必定含本脚本。
+      # 不可省略 ref：默认 checkout 的目标随触发事件变化，不是稳定语义。
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Generate latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag_name || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag_name }}
         shell: bash
         run: |
           set -euo pipefail
           gh release view "$TAG" --repo "$REPO" --json assets,body,tagName,url > release.json
-          node <<'NODE'
-          const fs = require("fs");
-          const release = JSON.parse(fs.readFileSync("release.json", "utf8"));
-          const repo = process.env.REPO;
-          const tag = release.tagName || process.env.TAG;
-          const version = tag.replace(/^v/i, "");
-          const baseUrl = `https://github.com/${repo}/releases/download/${tag}`;
-          const assets = (release.assets || [])
-            .map((asset) => asset.name)
-            .filter((name) => name !== "latest.json")
-            .map((name) => ({ name, url: `${baseUrl}/${encodeURIComponent(name)}` }));
-          const payload = {
-            version: `v${version}`,
-            url: release.url || `https://github.com/${repo}/releases/tag/${tag}`,
-            body: release.body || "",
-            assets
-          };
-          fs.writeFileSync("latest.json", `${JSON.stringify(payload, null, 2)}\n`);
-          NODE
-          cat latest.json
+          # 生成逻辑抽在 scripts/release/generate-latest-json.mjs，便于单元测试覆盖
+          # 「排除错误/陈旧资产」「缺件时拒绝生成」等语义。
+          node scripts/release/generate-latest-json.mjs release.json latest.json
 
       - name: Upload latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag_name || github.event.release.tag_name }}
+          TAG: ${{ inputs.tag_name }}
           REPO: ${{ github.repository }}
         shell: bash
         run: gh release upload "$TAG" latest.json --clobber --repo "$REPO"
