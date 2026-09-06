@@ -88,6 +88,48 @@ build_assets=false'
 TAG="" RELEASE_EXISTS=false REMOTE_TAG_EXISTS=false ASSETS="" \
   check "缺少 TAG：显式失败" 1 '缺少 TAG'
 
+# 用例 8：复刻 v1.2.57 当前线上状态——正确的 Windows 资产 + 2 个 `main` 错误资产。
+# 期望资产尚缺，且必须识别出错误资产待清理。
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="CodexPlusPlus-1.2.57-windows-x64-setup.exe
+CodexPlusPlus-1.2.57-windows-x64.zip
+CodexPlusPlus-main-macos-arm64.dmg
+CodexPlusPlus-main-macos-arm64.zip" \
+  check "线上现状：缺件且混有错误资产" 0 'create_release=false
+build_assets=true
+cleanup_assets=true
+CodexPlusPlus-main-macos-arm64.dmg
+CodexPlusPlus-main-macos-arm64.zip'
+
+# 用例 9：期望的 7 项全部齐全，但仍混有 `main` 错误资产。
+# 关键回归点：不得因「期望资产齐全」就判定完整并幂等跳过，否则错误资产永久残留。
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets
+echo 'CodexPlusPlus-main-macos-arm64.dmg'
+echo 'CodexPlusPlus-main-macos-arm64.zip')" \
+  check "齐全但混有错误资产：必须清理且不得误判完整" 0 'create_release=false
+cleanup_assets=true
+CodexPlusPlus-main-macos-arm64.dmg'
+
+# 用例 10：非目标版本的陈旧安装包（上一版本残留）同样属于错误资产。
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets
+echo 'CodexPlusPlus-1.2.56-windows-x64.zip')" \
+  check "陈旧版本资产：识别为待清理" 0 'cleanup_assets=true
+CodexPlusPlus-1.2.56-windows-x64.zip'
+
+# 用例 11：完整且没有任何多余资产时，才允许幂等跳过，且不得触发清理。
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets)" \
+  check "严格完整：幂等跳过且不清理" 0 'build_assets=false
+cleanup_assets=false'
+
+# 用例 12：latest.json 属于期望清单，绝不能被误判为待清理资产。
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets)" \
+  check "latest.json 不得被误判为错误资产" 0 'cleanup_assets=false'
+out_check="$(TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets)" \
+  bash "$TARGET" 2>&1)"
+if grep -q 'stale=latest.json' <<<"$out_check"; then
+  FAIL=$((FAIL + 1))
+  echo "FAIL: latest.json 被错误列入清理清单"
+fi
+
 # 用例 7：期望资产清单必须与打包脚本/workflow 实际产出的文件名模板一致，
 # 否则 verify 会因为对不上名字而永远判定“资产不完整”。
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

@@ -21,6 +21,8 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       create_release: ${{ steps.decide.outputs.create_release }}
       build_assets: ${{ steps.decide.outputs.build_assets }}
+      cleanup_assets: ${{ steps.decide.outputs.cleanup_assets }}
+      stale_assets: ${{ steps.decide.outputs.stale_assets }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,15 +97,46 @@ jobs:
           gh release create "$TAG" --repo "$REPO" --target "$SHA" --title "$TAG" --generate-notes
           echo "Release $TAG 已创建。"
 
+  # 删除期望清单之外的错误/陈旧资产。必须早于 release-assets：
+  # 否则错误资产会被 latest.json 收录，使更新元数据指向不存在或错误的文件。
+  # 仅删除 Release 资产（contents: write 即可），不触碰 tag、commit 与 Release 本身，
+  # 删错也可由后续构建重新上传，属可恢复操作。
+  cleanup-assets:
+    name: Remove stale release assets
+    needs: [plan, create-release]
+    if: always() && needs.plan.outputs.cleanup_assets == 'true' && needs.create-release.result != 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete stale assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          STALE: ${{ needs.plan.outputs.stale_assets }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a names <<< "$STALE"
+          for name in "${names[@]}"; do
+            [ -z "$name" ] && continue
+            echo "删除错误/陈旧资产：$name"
+            # 删除失败即显式失败：残留错误资产会污染 latest.json。
+            gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
+          done
+          echo "已清理 ${#names[@]} 项资产。"
+
   # 用 workflow_call 直接嵌套调用资产构建，而不是 `gh workflow run` 派发：
   # GITHUB_TOKEN 没有 actions:write，派发会以 HTTP 403 失败（见 run 34015804532），
   # 且 GITHUB_TOKEN 创建的 release 也不会触发 release: published 事件。
   release-assets:
     name: Build release assets
-    needs: [plan, create-release]
-    # create-release 在无需建 Release（补齐资产）时被跳过，因此这里用 always()
+    needs: [plan, create-release, cleanup-assets]
+    # create-release 与 cleanup-assets 各自在不需要时被跳过，因此用 always()
     # 配合显式失败判断，避免 skipped 依赖把整条链静默带过。
-    if: always() && needs.plan.outputs.build_assets == 'true' && needs.create-release.result != 'failure'
+    if: >-
+      always() && needs.plan.outputs.build_assets == 'true'
+      && needs.create-release.result != 'failure'
+      && needs.cleanup-assets.result != 'failure'
     uses: ./.github/workflows/release-assets.yml
     permissions:
       contents: write
@@ -112,17 +145,20 @@ jobs:
 
   verify:
     name: Verify release assets
-    needs: [plan, create-release, release-assets]
+    needs: [plan, create-release, cleanup-assets, release-assets]
     if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     steps:
       # 任一上游 job 失败都必须让本次发布显式失败，
       # 不得把“Release 已创建”当作发布成功。
       - name: Fail on upstream failure
-        if: needs.create-release.result == 'failure' || needs.release-assets.result == 'failure'
+        if: >-
+          needs.create-release.result == 'failure'
+          || needs.cleanup-assets.result == 'failure'
+          || needs.release-assets.result == 'failure'
         shell: bash
         run: |
-          echo "::error::发布链失败：create-release=${{ needs.create-release.result }}, release-assets=${{ needs.release-assets.result }}"
+          echo "::error::发布链失败：create-release=${{ needs.create-release.result }}, cleanup-assets=${{ needs.cleanup-assets.result }}, release-assets=${{ needs.release-assets.result }}"
           exit 1
 
       - name: Checkout
@@ -137,7 +173,10 @@ jobs:
         run: |
           set -euo pipefail
           gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' > assets.txt
-          # 复用同一判定脚本：资产齐全时它会输出 build_assets=false。
+          echo "Release $TAG 当前资产："
+          sed 's/^/  /' assets.txt
+          # 复用同一判定脚本：资产严格齐全（无缺件、无多余）时它会同时输出
+          # build_assets=false 与 cleanup_assets=false。
           out="$(ASSETS="$(cat assets.txt)" RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true \
             bash scripts/release/decide-release-action.sh)"
           echo "$out"
@@ -145,4 +184,9 @@ jobs:
             echo "::error::Release $TAG 资产仍不完整，发布未成功。"
             exit 1
           fi
-          echo "Release $TAG 资产完整。"
+          # 多余资产同样使 Release 不合格：它们会被 latest.json 收录。
+          if ! grep -q '^cleanup_assets=false$' <<<"$out"; then
+            echo "::error::Release $TAG 仍存在错误或陈旧资产，发布未成功。"
+            exit 1
+          fi
+          echo "Release $TAG 资产严格完整。"
