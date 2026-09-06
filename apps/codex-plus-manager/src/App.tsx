@@ -10456,7 +10456,12 @@ function withGeneratedRelayFiles(profile: RelayProfile): RelayProfile {
   }
   return {
     ...profile,
-    configContents: buildRelayConfigToml(profile, { includeBearerToken: false, requiresOpenAiAuth: true }),
+    // RUYI-64：纯 API 中转站模板不得写 requires_openai_auth = true（文生图会走
+    // OpenAI 登录态而失败）；http_headers 由后端 apply 时按本地凭据补写。
+    configContents: buildRelayConfigToml(profile, {
+      includeBearerToken: false,
+      requiresOpenAiAuth: profile.relayMode !== "pureApi",
+    }),
     authContents: buildRelayAuthJson(profile),
   };
 }
