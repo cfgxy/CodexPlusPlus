@@ -515,30 +515,30 @@ body {
   letter-spacing: 0;
 }
 
-.jojocode-overview {
+.sponsor-overview {
   border-color: hsl(var(--border));
   background: hsl(var(--card));
 }
 
-.light .jojocode-overview {
+.light .sponsor-overview {
   background: hsl(var(--card));
 }
 
-.jojocode-overview-layout {
+.sponsor-overview-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
 }
 
-.jojocode-overview-main {
+.sponsor-overview-main {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }
 
-.jojocode-overview-mark {
+.sponsor-overview-mark {
   display: grid;
   place-items: center;
   width: 42px;
@@ -549,25 +549,25 @@ body {
   color: hsl(var(--brand-accent));
 }
 
-.jojocode-overview h2 {
+.sponsor-overview h2 {
   margin: 2px 0 4px;
   font-size: 20px;
   line-height: 1.25;
 }
 
-.jojocode-overview p {
+.sponsor-overview p {
   margin: 0;
   color: hsl(var(--muted-foreground));
   line-height: 1.5;
 }
 
-.jojocode-overview-side {
+.sponsor-overview-side {
   display: grid;
   justify-items: end;
   gap: 10px;
 }
 
-.jojocode-model-tags {
+.sponsor-model-tags {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -575,7 +575,7 @@ body {
   max-width: 390px;
 }
 
-.jojocode-model-tags span {
+.sponsor-model-tags span {
   border: 1px solid hsl(var(--brand-accent) / 0.28);
   border-radius: 999px;
   background: hsl(var(--background) / 0.5);
@@ -5403,7 +5403,7 @@ select {
 }
 
 .hero-layout h2,
-.jojocode-overview h2 {
+.sponsor-overview h2 {
   font-size: 19px;
   font-weight: 620;
   letter-spacing: -0.02em;
@@ -5418,7 +5418,7 @@ select {
 }
 
 /* 赞助位：极淡的品牌色渐变，与普通面板区分 */
-.jojocode-overview,
+.sponsor-overview,
 .hero-panel {
   border-color: hsl(var(--brand-accent) / 0.24);
   background:
@@ -5431,7 +5431,7 @@ select {
     hsl(var(--card));
 }
 
-.jojocode-overview-mark {
+.sponsor-overview-mark {
   border-color: transparent;
   border-radius: var(--radius-lg);
   background: linear-gradient(140deg, hsl(var(--brand-accent)), hsl(var(--brand-accent-2)));
@@ -5439,7 +5439,7 @@ select {
   color: #fff;
 }
 
-.jojocode-model-tags span,
+.sponsor-model-tags span,
 .ad-tags span,
 .script-market-tag {
   border-color: hsl(var(--border) / 0.9);
@@ -5993,18 +5993,18 @@ select {
     display: none;
   }
 
-  .jojocode-overview-layout,
-  .jojocode-overview-main,
+  .sponsor-overview-layout,
+  .sponsor-overview-main,
   .ad-grid,
   .mobile-server-grid {
     grid-template-columns: 1fr;
   }
 
-  .jojocode-overview-side {
+  .sponsor-overview-side {
     justify-items: start;
   }
 
-  .jojocode-model-tags {
+  .sponsor-model-tags {
     justify-content: flex-start;
   }
 

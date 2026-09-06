@@ -28,8 +28,8 @@ export const EN_PLAIN: Record<string, string> = {
   "Codex 意外停止": "Codex stopped unexpectedly",
   "Codex 版本": "Codex version",
   "Codex CLI 路径": "Codex CLI path",
-  "JOJO Code 提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。":
-    "JOJO Code provides a stable, competitively priced API relay supporting the full GPT-5.6 family, Fable 5, Sonnet 5, GPT-5.5, GPT-5.4, Claude Opus 4.8, Claude Opus 4.7, gpt-image-2 and other models plus image capabilities.",
+  "派诺云提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。":
+    "Apinoria provides a stable, competitively priced API relay supporting the full GPT-5.6 family, Fable 5, Sonnet 5, GPT-5.5, GPT-5.4, Claude Opus 4.8, Claude Opus 4.7, gpt-image-2 and other models plus image capabilities.",
   "Codex++ 导入": "Codex++ import",
   "Codex++ 版本": "Codex++ version",
   "Codex-Dream-Skin 风格主题和换图": "Codex-Dream-Skin style themes and image replacement",
@@ -368,8 +368,8 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭后本工具不会在手动切换时写入 Codex 的 config.toml / auth.json；启动 Codex 时始终不会自动改这些文件。":
     "When off, this tool won't write Codex's config.toml / auth.json on manual switches; it never auto-modifies these files when launching Codex.",
   "兼容增强": "Compatible enhancement",
-  "内容来自 BigPizzaV3/Ad-List，分为赞助商推荐和普通推荐。":
-    "Content comes from BigPizzaV3/Ad-List, split into sponsor recommendations and regular recommendations.",
+  "内容来自 cfgxy/CodexPlusPlus 仓库的 ads.json，分为赞助商推荐和普通推荐。":
+    "Content comes from ads.json in the cfgxy/CodexPlusPlus repository, split into sponsor recommendations and regular recommendations.",
   "内置": "Built-in",
   "内置、手动和市场安装脚本；可在这里启停或删除用户脚本": "Built-in, manual and marketplace-installed scripts; enable, disable or delete user scripts here",
   "内置和用户自定义脚本清单": "Built-in and user-defined script inventory",
@@ -565,7 +565,7 @@ export const EN_PLAIN: Record<string, string> = {
   "手动刷新": "Manual refresh",
   "手动启动": "Manual launch",
   "打开": "Open",
-  "打开 JOJO Code": "Open JOJO Code",
+  "打开派诺云": "Open Apinoria",
   "打开关于": "Open About",
   "打开链接": "Open link",
   "打开项目主页": "Open project homepage",

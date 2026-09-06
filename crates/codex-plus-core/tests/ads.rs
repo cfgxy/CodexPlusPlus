@@ -2,21 +2,11 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use codex_plus_core::ads::{
-    DEFAULT_AD_LIST_URLS, cache_busted_ad_url, fetch_ad_list_from_urls, normalize_ad_payload,
-};
+use codex_plus_core::ads::{cache_busted_ad_url, fetch_ad_list_from_urls, normalize_ad_payload};
 use serde_json::json;
 
-#[test]
-fn default_ad_urls_match_legacy_helper_sources() {
-    assert_eq!(
-        DEFAULT_AD_LIST_URLS,
-        [
-            "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-            "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
-        ]
-    );
-}
+// 默认源地址的断言已迁到 tests/ads_source.rs：那里连同仓库内 ads.json 的
+// 可读性、规范化存活率和无凭据一起校验，比这里单钉一组字符串更能兜住真实失败。
 
 #[test]
 fn cache_busted_ad_url_appends_version_query_to_plain_url() {
@@ -64,25 +54,32 @@ fn normalizes_remote_ads_for_plugin_and_manager_rendering() {
         ]
     }));
 
+    // 首位是强制装入的唯一赞助位，其后是原顺序：远端 sponsor、本地内置、远端 normal。
+    // 分类本身由 tests/sole_sponsor.rs 钉死，这里只守「过滤和排列没坏」。
     assert_eq!(payload["version"], json!(1));
-    assert_eq!(payload["ads"].as_array().unwrap().len(), 9);
-    assert_eq!(payload["ads"][0]["type"], json!("sponsor"));
-    assert_eq!(payload["ads"][1]["id"], json!("cubence"));
-    assert_eq!(payload["ads"][1]["type"], json!("sponsor"));
-    assert_eq!(payload["ads"][2]["id"], json!("quya-cloud-bridge"));
-    assert_eq!(payload["ads"][2]["type"], json!("sponsor"));
-    assert_eq!(payload["ads"][3]["id"], json!("deepkey-api-key"));
-    assert_eq!(payload["ads"][3]["type"], json!("sponsor"));
-    assert_eq!(payload["ads"][4]["id"], json!("ergou-api"));
-    assert_eq!(payload["ads"][4]["type"], json!("sponsor"));
-    assert_eq!(payload["ads"][5]["id"], json!("apimart"));
-    assert_eq!(payload["ads"][6]["id"], json!("fenno-ai"));
-    assert_eq!(payload["ads"][7]["id"], json!("qiniu-ai"));
-    assert_eq!(payload["ads"][8]["type"], json!("normal"));
+    assert_eq!(payload["ads"].as_array().unwrap().len(), 10);
+    assert_eq!(payload["ads"][0]["id"], json!("apinoria"));
+    assert_eq!(payload["ads"][1]["id"], json!("sponsor"));
+    assert_eq!(payload["ads"][2]["id"], json!("cubence"));
+    assert_eq!(payload["ads"][3]["id"], json!("quya-cloud-bridge"));
+    assert_eq!(payload["ads"][4]["id"], json!("deepkey-api-key"));
+    assert_eq!(payload["ads"][5]["id"], json!("ergou-api"));
+    assert_eq!(payload["ads"][6]["id"], json!("apimart"));
+    assert_eq!(payload["ads"][7]["id"], json!("fenno-ai"));
+    assert_eq!(payload["ads"][8]["id"], json!("qiniu-ai"));
+    assert_eq!(payload["ads"][9]["id"], json!("normal"));
+    // 标题为空的 broken 条目仍必须被过滤掉。
+    assert!(
+        !payload["ads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|ad| ad["id"] == json!("broken"))
+    );
 }
 
 #[test]
-fn builtin_sponsors_are_appended_after_remote_sponsors_in_declared_order() {
+fn builtin_recommendations_are_appended_after_remote_sponsors_in_declared_order() {
     let payload = normalize_ad_payload(json!({
         "version": 1,
         "ads": [
@@ -104,69 +101,71 @@ fn builtin_sponsors_are_appended_after_remote_sponsors_in_declared_order() {
     }));
     let ads = payload["ads"].as_array().unwrap();
 
-    assert_eq!(ads[0]["id"], json!("remote-sponsor"));
-    assert_eq!(ads[1]["id"], json!("cubence"));
-    assert_eq!(ads[1]["title"], json!("Cubence"));
+    // ads[0] 是强制装入的唯一赞助位（见 tests/sole_sponsor.rs），其后保持原顺序。
+    assert_eq!(ads[0]["id"], json!("apinoria"));
+    assert_eq!(ads[1]["id"], json!("remote-sponsor"));
+    assert_eq!(ads[2]["id"], json!("cubence"));
+    assert_eq!(ads[2]["title"], json!("Cubence"));
     assert_eq!(
-        ads[1]["url"],
+        ads[2]["url"],
         json!("https://cubence.com?source=codexplusplus")
     );
-    assert_eq!(ads[1]["expires_at"], json!("2026-08-02T23:59:59+08:00"));
-    assert!(
-        ads[1]["image"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,")
-    );
-    assert_eq!(ads[2]["id"], json!("quya-cloud-bridge"));
-    assert_eq!(ads[2]["title"], json!("quya.org 云桥"));
-    assert_eq!(ads[2]["url"], json!("https://www.quya.org/?promo=CODEX"));
     assert_eq!(ads[2]["expires_at"], json!("2026-08-02T23:59:59+08:00"));
     assert!(
         ads[2]["image"]
             .as_str()
             .unwrap()
-            .starts_with("data:image/svg+xml;base64,")
+            .starts_with("data:image/png;base64,")
     );
-    assert_eq!(ads[3]["id"], json!("deepkey-api-key"));
-    assert_eq!(ads[3]["title"], json!("deepkey｜API KEY"));
-    assert_eq!(
-        ads[3]["url"],
-        json!("https://deepkey.top/register?aff=DNVc")
-    );
-    assert_eq!(ads[3]["expires_at"], json!("2026-08-25T23:59:59+08:00"));
+    assert_eq!(ads[3]["id"], json!("quya-cloud-bridge"));
+    assert_eq!(ads[3]["title"], json!("quya.org 云桥"));
+    assert_eq!(ads[3]["url"], json!("https://www.quya.org/?promo=CODEX"));
+    assert_eq!(ads[3]["expires_at"], json!("2026-08-02T23:59:59+08:00"));
     assert!(
         ads[3]["image"]
             .as_str()
             .unwrap()
-            .starts_with("data:image/png;base64,")
+            .starts_with("data:image/svg+xml;base64,")
     );
-    assert_eq!(ads[4]["id"], json!("ergou-api"));
-    assert_eq!(ads[4]["title"], json!("二狗 API"));
+    assert_eq!(ads[4]["id"], json!("deepkey-api-key"));
+    assert_eq!(ads[4]["title"], json!("deepkey｜API KEY"));
     assert_eq!(
         ads[4]["url"],
-        json!("https://ergouapi.com/r/gh-codexplusplus")
+        json!("https://deepkey.top/register?aff=DNVc")
     );
-    assert_eq!(ads[4]["expires_at"], json!("2026-08-02T23:59:59+08:00"));
+    assert_eq!(ads[4]["expires_at"], json!("2026-08-25T23:59:59+08:00"));
     assert!(
         ads[4]["image"]
             .as_str()
             .unwrap()
             .starts_with("data:image/png;base64,")
     );
-    assert_eq!(ads[5]["id"], json!("apimart"));
+    assert_eq!(ads[5]["id"], json!("ergou-api"));
+    assert_eq!(ads[5]["title"], json!("二狗 API"));
     assert_eq!(
         ads[5]["url"],
+        json!("https://ergouapi.com/r/gh-codexplusplus")
+    );
+    assert_eq!(ads[5]["expires_at"], json!("2026-08-02T23:59:59+08:00"));
+    assert!(
+        ads[5]["image"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,")
+    );
+    assert_eq!(ads[6]["id"], json!("apimart"));
+    assert_eq!(
+        ads[6]["url"],
         json!("https://go.apimart.ai/gh-codexplusplus")
     );
-    assert_eq!(ads[5]["expires_at"], json!("2026-09-27T23:59:59+08:00"));
-    assert_eq!(ads[6]["id"], json!("fenno-ai"));
-    assert_eq!(ads[6]["url"], json!("https://api.fenno.ai/s/ZZM7"));
-    assert_eq!(ads[6]["expires_at"], json!("2026-11-27T23:59:59+08:00"));
-    assert_eq!(ads[7]["id"], json!("qiniu-ai"));
-    assert_eq!(ads[7]["url"], json!("https://s.qiniu.com/7zUJri"));
+    assert_eq!(ads[6]["expires_at"], json!("2026-09-27T23:59:59+08:00"));
+    assert_eq!(ads[7]["id"], json!("fenno-ai"));
+    assert_eq!(ads[7]["url"], json!("https://api.fenno.ai/s/ZZM7"));
     assert_eq!(ads[7]["expires_at"], json!("2026-11-27T23:59:59+08:00"));
-    for ad in &ads[5..=7] {
+    assert_eq!(ads[8]["id"], json!("qiniu-ai"));
+    assert_eq!(ads[8]["url"], json!("https://s.qiniu.com/7zUJri"));
+    assert_eq!(ads[8]["expires_at"], json!("2026-11-27T23:59:59+08:00"));
+    for ad in &ads[6..=8] {
         assert!(
             ad["image"]
                 .as_str()
@@ -174,7 +173,7 @@ fn builtin_sponsors_are_appended_after_remote_sponsors_in_declared_order() {
                 .starts_with("data:image/png;base64,")
         );
     }
-    assert_eq!(ads[8]["id"], json!("remote-normal"));
+    assert_eq!(ads[9]["id"], json!("remote-normal"));
 }
 
 #[test]

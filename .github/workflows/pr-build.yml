@@ -1,9 +1,12 @@
 name: PR build artifacts
 
+# 刻意不监听 main push：auto-release.yml 已在 main push 时构建同样的
+# Windows / macOS x64 / macOS arm64 三份产物并写入 Release。两者都监听会让
+# 同一次推送把三份包各构建两遍，白烧一倍额度，且两条链的产物无人比对，
+# 说不清哪份才是发布用的那份。main push 后的打包入口只有 auto-release.yml。
+# PR 校验与 workflow_dispatch 手动构建保持不变。
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,35 +15,9 @@ permissions:
 jobs:
   # 发布链自身的测试。这些脚本决定 Release 建不建、资产删不删、
   # latest.json 收录什么，出错只会在发布当天暴露，必须每次 PR 都跑。
+  # 具体步骤在 release-scripts.yml，auto-release.yml 复用同一份。
   release-scripts:
-    name: Release script tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install actionlint
-        run: |
-          set -euo pipefail
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          sudo mv actionlint /usr/local/bin/
-
-      - name: Lint workflows
-        run: actionlint
-
-      - name: Release action decision tests
-        run: bash scripts/release/decide-release-action.test.sh
-
-      - name: latest.json generator tests
-        run: node scripts/release/generate-latest-json.test.mjs
-
-      - name: Release entrypoint constraints
-        run: bash scripts/release/workflow-entrypoints.test.sh
+    uses: ./.github/workflows/release-scripts.yml
 
   windows-artifacts:
     name: Windows artifacts

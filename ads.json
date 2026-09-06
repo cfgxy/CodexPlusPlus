@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-10",
+  "ads": [
+    {
+      "id": "jojocode-codex-relay",
+      "type": "sponsor",
+      "title": "JOJO Code｜项目赞助商",
+      "description": "JOJO Code 提供稳定、价格合理的 API 中转服务，支持 GPT-5.6 全系列、Fable 5、Sonnet 5、GPT-5.5、GPT-5.4、Claude Opus 4.8、Claude Opus 4.7、gpt-image-2 等模型与图像能力。",
+      "url": "https://jojocode.com/",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-jojocode.png",
+      "expires_at": "2029-06-15",
+      "highlights": [
+        "价格划算",
+        "稳定接入",
+        "7×24 小时技术支持",
+        "高缓存命中",
+        "支持包月套餐"
+      ]
+    },
+    {
+      "id": "0029-token-bridge",
+      "type": "sponsor",
+      "title": "PackyCode",
+      "description": "稳定可靠 服务及时 价格优惠",
+      "url": "https://www.packyapi.com/register?aff=huangmo",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-packycode.png",
+      "expires_at": "2026-08-18",
+      "highlights": [
+        "TOKEN 中转",
+        "低延迟高可用",
+        "7×24 小时技术支持"
+      ]
+    },
+    {
+      "id": "volcengine-ark-agent-plan",
+      "type": "sponsor",
+      "title": "火山引擎｜方舟 Agent Plan",
+      "description": "方舟 Agent Plan 集成 Doubao-Seed、Doubao-Seedance、Doubao-Seedream 等字节跳动自研模型，覆盖文本、代码、图像、视频等多模态任务，深度支持 Agent 框架与 AI 编程工具。",
+      "url": "https://dis.chatdesks.cn/chatdesk/hsyqCodexPlusPlus.html",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-volcengine.png",
+      "expires_at": "2026-08-30",
+      "highlights": [
+        "限时 2.5 折",
+        "多模态模型",
+        "Agent 编程工具",
+        "Doubao-Seed",
+        "BytePlus ModelArk"
+      ]
+    },
+    {
+      "id": "0055-token-bridge",
+      "type": "sponsor",
+      "title": "Token云桥｜0029.org",
+      "description": "专业 AI 密钥 TOKEN 中转站，提供 ChatGPT、Claude、Gemini、Codex、GPT-5 等 API 密钥代购、代充、中转与稳定调用服务。",
+      "url": "https://www.0029.org/?promo=AFF11F",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-0029.svg",
+      "expires_at": "2026-06-18",
+      "highlights": [
+        "AI 密钥代购",
+        "TOKEN 中转",
+        "低延迟高可用",
+        "订单可追踪",
+        "7×24 小时技术支持"
+      ]
+    },
+    {
+      "id": "apikey-fun-ai-relay",
+      "type": "sponsor",
+      "title": "APIKEY.FUN",
+      "description": "开放、稳定、高性价比的全球主流大模型 AI 中转站，支持 Claude、OpenAI、Gemini 等热门模型 API 中转，价格低至官方原价 7%，专属链接注册可享最高充值永久 95 折优惠。",
+      "url": "https://apikey.fun/register?aff=CODEX",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-apikey-fun.png",
+      "expires_at": "2026-11-22",
+      "highlights": [
+        "Claude / OpenAI / Gemini",
+        "低至官方 7%",
+        "稳定中转",
+        "永久 95 折优惠"
+      ]
+    },
+    {
+      "id": "rawchat-codex-relay",
+      "type": "sponsor",
+      "title": "RawChat｜Codex 中转站",
+      "description": "老牌中转站，支持包月套餐。低倍率调用，高缓存命中，Pro/Plus 号池，全天专人维护。",
+      "url": "https://rawchat.cn",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-rawchat.svg",
+      "expires_at": "2026-06-15",
+      "highlights": [
+        "支持包月套餐",
+        "低倍率调用",
+        "高缓存命中",
+        "Pro/Plus 号池",
+        "全天专人维护"
+      ]
+    },
+    {
+      "id": "0021-token-bridge",
+      "type": "normal",
+      "title": "广告位",
+      "description": "",
+      "url": "",
+      "expires_at": "2027-05-14",
+      "highlights": [
+        "V:DumpMem"
+      ]
+    },
+    {
+      "id": "baikewei-ai",
+      "type": "sponsor",
+      "title": "百可为AI",
+      "description": "百可为AI 是面向开发者、团队和 AI 工具用户的一站式大模型 API 服务平台，支持 Claude、OpenAI、Gemini、Codex 等主流模型能力接入。平台提供稳定中转、灵活计费、用量统计、余额管理和多场景 API 调用能力，适合 Claude Code、Codex、AI 生图、自动化脚本和各类智能应用长期使用。新用户注册可领取免费额度，开发者可快速接入、即开即用，让 AI 能力更稳定、更高效、更省心。",
+      "url": "https://cn.hb-api.online/register?aff=8KA2ZKWNHND8",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-baikewei-ai.jpg",
+      "expires_at": "2026-09-11",
+      "highlights": [
+        "Claude / OpenAI / Gemini",
+        "Codex / Claude Code",
+        "稳定中转",
+        "免费额度",
+        "开发者 API",
+        "AI 生图工具"
+      ]
+    },
+    {
+      "id": "deepkey-api-key",
+      "type": "sponsor",
+      "title": "deepkey｜API KEY",
+      "description": "deepkey 起初只是连接顶级算力的上游供应商，凭借稳定低价的接口被学生群体发现并口口相传。随着开发者与学子的涌入，这里不再只是 API 的搬运工，而是共同探讨提示词工程、分享创新应用的温暖社区。从工具到伙伴，deepkey 见证了无数灵感的诞生与落地。",
+      "url": "https://deepkey.top/register?aff=DNVc",
+      "image": "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/docs/images/sponsor-deepkey.png",
+      "expires_at": "2026-08-25",
+      "highlights": [
+        "稳定低价",
+        "提示词工程社区",
+        "注册进群享福利"
+      ]
+    }
+  ]
+}

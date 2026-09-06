@@ -14,15 +14,27 @@ const ERGOU_API_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-ergo
 const APIMART_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-apimart.png");
 const FENNO_AI_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-fenno-ai.png");
 const QINIU_AI_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-qiniu-ai.png");
+/// Apinoria 赞助位主图。`include_bytes!` 把资产编进二进制，赞助位不依赖
+/// 运行时能否访问远端图床——赞助商展示是对外承诺，不能因网络抖动缺图。
+const APINORIA_IMAGE: &[u8] = include_bytes!("../../../docs/images/sponsor-apinoria.png");
 const BUILTIN_SPONSOR_EXPIRES_AT: &str = "2026-08-02T23:59:59+08:00";
 const DEEPKEY_SPONSOR_EXPIRES_AT: &str = "2026-08-25T23:59:59+08:00";
 const APIMART_SPONSOR_EXPIRES_AT: &str = "2026-09-27T23:59:59+08:00";
 const NEW_SPONSOR_EXPIRES_AT: &str = "2026-11-27T23:59:59+08:00";
 
+/// 推荐内容数据源。两条都指向本仓库根的 ads.json：
+/// raw 是主源，拿到的是即时内容；jsDelivr 是同一文件的 CDN 镜像，作备用，
+/// 有缓存延迟，因此顺序不能颠倒——写反会让更新迟迟不生效。
 pub const DEFAULT_AD_LIST_URLS: [&str; 2] = [
-    "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-    "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
+    "https://raw.githubusercontent.com/cfgxy/CodexPlusPlus/main/ads.json",
+    "https://cdn.jsdelivr.net/gh/cfgxy/CodexPlusPlus@main/ads.json",
 ];
+
+/// 唯一赞助商。分类规则在客户端强制，不依赖远端 ads.json 摆对：
+/// 远端文件谁改一笔都会多出赞助位，而错误只发生在用户机器上、无 CI 报警。
+pub const SOLE_SPONSOR_ID: &str = "apinoria";
+pub const SOLE_SPONSOR_URL: &str = "https://www.apinoria.com/";
+const SOLE_SPONSOR_HOST: &str = "apinoria.com";
 
 pub fn normalize_ad_payload(payload: Value) -> Value {
     let version = payload.get("version").and_then(Value::as_u64).unwrap_or(1);
@@ -44,8 +56,82 @@ pub fn normalize_ad_payload(payload: Value) -> Value {
         .cloned()
         .collect::<Vec<_>>();
     fill_known_remote_logos(&mut ads);
-    append_builtin_sponsors(&mut ads);
+    append_builtin_recommendations(&mut ads);
+    install_sole_sponsor(&mut ads);
     json!({ "version": version, "ads": ads })
+}
+
+/// 把 Apinoria 装为列表中唯一的赞助商，其余一律降为普通推荐。
+///
+/// 降级而非删除：这些条目仍要作为普通推荐展示，直接丢弃会让推荐列表
+/// 凭空少掉大半内容。先清掉所有指向 Apinoria 的既有条目再插入，
+/// 是因为远端数据迟早会自己带上它，无条件追加会出现两个一样的赞助位。
+fn install_sole_sponsor(ads: &mut Vec<Value>) {
+    ads.retain(|ad| !is_sole_sponsor(ad));
+    for ad in ads.iter_mut() {
+        let Some(object) = ad.as_object_mut() else {
+            continue;
+        };
+        object.insert("type".to_string(), json!("normal"));
+    }
+    // 排在末尾的唯一赞助位等于没投放。
+    ads.insert(0, sole_sponsor());
+}
+
+fn is_sole_sponsor(ad: &Value) -> bool {
+    if ad.get("id").and_then(Value::as_str) == Some(SOLE_SPONSOR_ID) {
+        return true;
+    }
+    ad.get("url")
+        .and_then(Value::as_str)
+        .is_some_and(url_belongs_to_sole_sponsor)
+}
+
+/// 判断 URL 是否真的属于 Apinoria。
+///
+/// 必须解析出 host 再按域名边界比对，不能对整条 URL 做子串包含：
+/// `https://other.example/?source=apinoria.com`、`https://apinoria.com.example/`
+/// 和 `https://notapinoria.com/` 都含有这段文本，但都不是 Apinoria。
+/// 按子串判会把这些合法条目当成重复赞助位整条删掉，普通推荐凭空丢失。
+fn url_belongs_to_sole_sponsor(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    host_belongs_to_sole_sponsor(host)
+}
+
+/// 主域名本身或它的子域名才算命中；`notapinoria.com`、`apinoria.com.example`
+/// 都不满足「以 `.apinoria.com` 结尾」这条边界。
+fn host_belongs_to_sole_sponsor(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == SOLE_SPONSOR_HOST || host.ends_with(&format!(".{SOLE_SPONSOR_HOST}"))
+}
+
+/// 唯一赞助位主图的 data URI。注入脚本自己 normalize、不经 Rust，
+/// 只有把同一份 `include_bytes!` 资产喂过去，两条取数路径的图片才同源可追溯。
+pub fn sole_sponsor_image() -> String {
+    data_uri("image/png", APINORIA_IMAGE)
+}
+
+fn sole_sponsor() -> Value {
+    let mut sponsor = Map::new();
+    sponsor.insert("id".to_string(), json!(SOLE_SPONSOR_ID));
+    sponsor.insert("type".to_string(), json!("sponsor"));
+    sponsor.insert("title".to_string(), json!("派诺云"));
+    sponsor.insert(
+        "description".to_string(),
+        json!("Codex++ 项目赞助商，提供稳定、价格合理的 API 中转服务。"),
+    );
+    sponsor.insert("url".to_string(), json!(SOLE_SPONSOR_URL));
+    sponsor.insert("image".to_string(), json!(sole_sponsor_image()));
+    sponsor.insert(
+        "highlights".to_string(),
+        json!(["项目赞助商", "API 中转服务"]),
+    );
+    Value::Object(sponsor)
 }
 
 fn fill_known_remote_logos(ads: &mut [Value]) {
@@ -87,14 +173,18 @@ fn known_remote_logo(id: &str) -> Option<(&'static str, &'static [u8])> {
     }
 }
 
-fn append_builtin_sponsors(ads: &mut Vec<Value>) {
+/// 追加本地内置的推荐条目。
+///
+/// 这些条目历史上是赞助商，现按 Owner 规则一律作为普通推荐：赞助位只留给
+/// Apinoria。仍保留在列表里，是因为它们对用户仍有参考价值，删掉等于白丢内容。
+fn append_builtin_recommendations(ads: &mut Vec<Value>) {
     let insert_at = ads
         .iter()
         .rposition(|ad| ad.get("type").and_then(Value::as_str) == Some("sponsor"))
         .map(|index| index + 1)
         .unwrap_or(0);
     let builtins = [
-        builtin_sponsor(
+        builtin_recommendation(
             "cubence",
             "Cubence",
             "稳定、高效的 API 中转服务，支持 Claude Code、Codex、Gemini 等模型，适合日常开发和团队使用。",
@@ -104,7 +194,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             &["Claude Code", "Codex / Gemini", "稳定接入"],
             BUILTIN_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "quya-cloud-bridge",
             "quya.org 云桥",
             "一站式 AI 中转平台，集成 Claude Code、Codex、Gemini 等模型，提供包月和按量计费方案。",
@@ -118,7 +208,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             ],
             BUILTIN_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "deepkey-api-key",
             "deepkey｜API KEY",
             "面向开发者与学生群体的 API KEY 服务，提供稳定接口和提示词工程交流社区。",
@@ -128,7 +218,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             &["稳定接口", "开发者社区", "提示词交流"],
             DEEPKEY_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "ergou-api",
             "二狗 API",
             "AI API 中转服务，覆盖 Claude、GPT、Gemini 等模型，提供低延迟线路和备用链路。",
@@ -138,7 +228,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             &["Claude / GPT / Gemini", "低延迟线路", "备用链路"],
             BUILTIN_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "apimart",
             "API Mart",
             "专注 AI 图片和视频生成的低价 API 平台，一套异步 API 覆盖图片与视频任务，支持大批量生成和按量付费。",
@@ -148,7 +238,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             &["图片 / 视频", "异步任务 API", "按量付费"],
             APIMART_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "fenno-ai",
             "FennoAI",
             "稳定高效的 Codex API 中转服务，兼容 OpenAI 与 Anthropic 协议，支持企业级调用、公对公结算和开票。",
@@ -158,7 +248,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
             &["Codex 中转", "企业级调用", "公对公结算"],
             NEW_SPONSOR_EXPIRES_AT,
         ),
-        builtin_sponsor(
+        builtin_recommendation(
             "qiniu-ai",
             "七牛云",
             "七牛云旗下企业级大模型 MaaS 平台，一站式调用全球 150 多个主流模型，覆盖文本、图像、音频、视频等全模态能力。",
@@ -183,7 +273,7 @@ fn append_builtin_sponsors(ads: &mut Vec<Value>) {
     }
 }
 
-fn builtin_sponsor(
+fn builtin_recommendation(
     id: &str,
     title: &str,
     description: &str,
@@ -195,7 +285,8 @@ fn builtin_sponsor(
 ) -> Value {
     let mut sponsor = Map::new();
     sponsor.insert("id".to_string(), json!(id));
-    sponsor.insert("type".to_string(), json!("sponsor"));
+    // 赞助位只留给 Apinoria；本地内置条目一律作为普通推荐。
+    sponsor.insert("type".to_string(), json!("normal"));
     sponsor.insert("title".to_string(), json!(title));
     sponsor.insert("description".to_string(), json!(description));
     sponsor.insert("url".to_string(), json!(url));

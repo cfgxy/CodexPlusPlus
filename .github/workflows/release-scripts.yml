@@ -1,0 +1,41 @@
+name: Release script tests
+
+# 发布链自身的测试：这些脚本决定 Release 建不建、资产删不删、latest.json 收录什么，
+# 出错只会在发布当天暴露，因此 PR 校验和正式发布两条链都要跑它。
+# 抽成可复用工作流，避免两处各维护一份相同步骤而逐渐漂移。
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Release script tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          sudo mv actionlint /usr/local/bin/
+
+      - name: Lint workflows
+        run: actionlint
+
+      - name: Release action decision tests
+        run: bash scripts/release/decide-release-action.test.sh
+
+      - name: latest.json generator tests
+        run: node scripts/release/generate-latest-json.test.mjs
+
+      - name: Release entrypoint constraints
+        run: bash scripts/release/workflow-entrypoints.test.sh
