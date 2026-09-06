@@ -117,7 +117,7 @@ fn repository_ads_json_survives_normalization() {
         normalized_ads
             .iter()
             .any(|ad| ad["id"] == serde_json::json!("qiniu-ai")),
-        "本地内置赞助商未被追加，本地 sponsor 追加逻辑可能已回归"
+        "本地内置推荐条目未被追加，本地追加逻辑可能已回归"
     );
 }
 

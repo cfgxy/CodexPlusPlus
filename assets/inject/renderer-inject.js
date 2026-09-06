@@ -3992,9 +3992,33 @@
     return Number.isFinite(expiresAt) && expiresAt < Date.now();
   }
 
+  const CODEX_PLUS_SOLE_SPONSOR_ID = "apinoria";
+  const CODEX_PLUS_SOLE_SPONSOR_URL = "https://www.apinoria.com/";
+
+  // 与 crates/codex-plus-core/src/ads.rs 的 install_sole_sponsor 同规则：
+  // Apinoria 是唯一赞助商，其余全部降为普通推荐。这条路径自己 normalize、
+  // 不经 Rust，只在后端强制会让插件菜单仍显示一排赞助商。
+  // 降级而非删除——那些条目仍作普通推荐展示；先清掉既有 Apinoria 再插入，
+  // 是防远端数据自带同一家时出现两个一模一样的赞助位。
+  function enforceCodexPlusSoleSponsor(ads) {
+    const rest = ads
+      .filter((ad) => ad.id !== CODEX_PLUS_SOLE_SPONSOR_ID && !ad.url.includes("apinoria.com"))
+      .map((ad) => ({ ...ad, type: "normal" }));
+    return [{
+      id: CODEX_PLUS_SOLE_SPONSOR_ID,
+      type: "sponsor",
+      title: "派诺云",
+      description: "Codex++ 项目赞助商，提供稳定、价格合理的 API 中转服务。",
+      url: CODEX_PLUS_SOLE_SPONSOR_URL,
+      image: "",
+      expires_at: "",
+      highlights: ["项目赞助商", "API 中转服务"],
+    }, ...rest];
+  }
+
   function normalizeCodexPlusAds(payload) {
     if (!payload || !Array.isArray(payload.ads)) return [];
-    return payload.ads.filter((ad) => {
+    const ads = payload.ads.filter((ad) => {
       return ad && ["sponsor", "normal"].includes(ad.type) && ad.title && ad.description && ad.url && !isCodexPlusAdExpired(ad);
     }).map((ad) => ({
       id: String(ad.id || ad.title),
@@ -4006,6 +4030,9 @@
       expires_at: ad.expires_at ? String(ad.expires_at) : "",
       highlights: Array.isArray(ad.highlights) ? ad.highlights.map((item) => String(item)).filter(Boolean) : [],
     }));
+    // 刻意不在这里注入赞助位：调用方用返回长度判断本地后端是否给出内容，
+    // 无条件塞一条会让「本地为空则回退直取远端」这条分支永远不成立。
+    return ads;
   }
 
   function formatCodexPlusAdTitle(title) {
@@ -4080,12 +4107,14 @@
       const localPayload = await postJson(codexPlusAdsUrl, {});
       codexPlusAds = normalizeCodexPlusAds(localPayload?.ads ? localPayload : localPayload?.payload);
       if (!codexPlusAds.length) codexPlusAds = normalizeCodexPlusAds(await directFetchCodexPlusAds());
+      codexPlusAds = enforceCodexPlusSoleSponsor(codexPlusAds);
     } catch (error) {
       sendCodexPlusDiagnostic("ads_fetch_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
-      codexPlusAds = [];
+      // 数据源抖动不该让赞助位消失：赞助商展示是对外承诺。
+      codexPlusAds = enforceCodexPlusSoleSponsor([]);
     } finally {
       codexPlusAdsLoaded = true;
       const panel = document.querySelector('[data-codex-plus-panel="sponsor"] .codex-plus-ad-remote');
