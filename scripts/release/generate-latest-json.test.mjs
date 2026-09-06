@@ -202,6 +202,37 @@ check("CLI 入口：实际生成 latest.json 且排除错误资产", () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// 入口判定失败时必须显式报错，不得静默以退出码 0 结束却不生成文件。
+check("realpath 无法解析时显式失败，不静默跳过", () => {
+  const os = fsRequire("node:os");
+  const pathMod = fsRequire("node:path");
+  const cp = fsRequire("node:child_process");
+  const tmp = fs.mkdtempSync(pathMod.join(os.tmpdir(), "latest-json-guard-"));
+  // 指向断链符号链接：realpathSync 抛 ENOENT，且它与脚本自身路径不相等。
+  const broken = pathMod.join(tmp, "broken-link.mjs");
+  fs.symlinkSync(pathMod.join(tmp, "does-not-exist.mjs"), broken);
+  const selfPath = fileURLToPath(import.meta.url).replace(
+    "generate-latest-json.test.mjs",
+    "generate-latest-json.mjs"
+  );
+  // `node -e` 下 argv[1] 就是尾随的那个路径，且不会被当模块加载——
+  // 这样才能让脚本正常 import，同时把 argv[1] 伪装成无法 realpath 的路径。
+  const res = cp.spawnSync(
+    process.execPath,
+    ["-e", `import(${JSON.stringify(`file://${selfPath}`)})`, broken],
+    { encoding: "utf8" }
+  );
+  assert(
+    res.status !== 0,
+    `断链路径下应显式失败，实际退出码 ${res.status}（静默通过是最难查的失败形态）`
+  );
+  assert(
+    /无法判定脚本入口/.test(res.stderr),
+    `错误信息应说明入口判定失败，实际 stderr：${res.stderr}`
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 console.log();
 console.log(`通过 ${pass} 项，失败 ${fail} 项。`);
 process.exit(fail === 0 ? 0 : 1);

@@ -11,7 +11,7 @@
 #   create_release=true|false   是否需要创建 Release
 #   build_assets=true|false     是否需要构建并上传安装资产
 #   cleanup_assets=true|false   是否存在需要先行删除的错误/陈旧资产
-#   stale_assets=<逗号分隔>     待删除的资产名清单
+#   stale_assets=<每行一个>     待删除的资产名清单（多行 output）
 #
 # 语义要点：
 #   - Release 已存在但资产缺失时必须补齐，不得因“Release 已存在”直接跳过。
@@ -49,6 +49,24 @@ emit() {
   fi
 }
 
+# 多行值必须用 GitHub Actions 的 heredoc 语法写 output，否则会被截断。
+# 资产名清单不能用逗号拼接：文件名本身允许含逗号，拼接后无法无损还原，
+# 会把一个真实文件名拆成两个不存在的名字，删除失败或漏删。
+emit_multiline() {
+  local key="$1"
+  shift
+  printf '%s\n' "$key:"
+  [ "$#" -gt 0 ] && printf '  %s\n' "$@"
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    local delim="ghadelim_$$_${RANDOM}"
+    {
+      echo "$key<<$delim"
+      [ "$#" -gt 0 ] && printf '%s\n' "$@"
+      echo "$delim"
+    } >> "$GITHUB_OUTPUT"
+  fi
+}
+
 if [ "${RELEASE_EXISTS:-false}" != "true" ]; then
   if [ "${REMOTE_TAG_EXISTS:-false}" = "true" ]; then
     echo "::error::tag $TAG 已存在但没有对应的 Release，请检查仓库状态，或升级 Cargo.toml 的 workspace 版本号后再发布。" >&2
@@ -58,33 +76,46 @@ if [ "${RELEASE_EXISTS:-false}" != "true" ]; then
   emit "create_release=true"
   emit "build_assets=true"
   emit "cleanup_assets=false"
-  emit "stale_assets="
+  emit_multiline "stale_assets"
   exit 0
 fi
 
 # Release 已存在：同时检查“缺件”与“多余”，两者都会让 Release 不合格。
+#
+# 现有资产先读进数组，全程用字符串比较判定，不经过管道。
+# 曾用 `printf ... | grep -Fxq`：grep 命中即退出，printf 收到 SIGPIPE 返回 141，
+# 在 `set -o pipefail` 下把整条管道判为失败，于是完整 Release 有约一半概率
+# 被误判为缺件并重建——同一输入随机翻转，属竞态而非逻辑错误。
+present=()
+while IFS= read -r existing; do
+  [ -z "$existing" ] && continue
+  present+=("$existing")
+done <<<"${ASSETS:-}"
+
+contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    [ "$item" = "$needle" ] && return 0
+  done
+  return 1
+}
+
 missing=()
 for asset in "${expected_assets[@]}"; do
-  if ! printf '%s\n' "${ASSETS:-}" | grep -Fxq "$asset"; then
+  if ! contains "$asset" ${present[@]+"${present[@]}"}; then
     missing+=("$asset")
   fi
 done
 
 # 期望清单之外的资产一律视为错误或陈旧产物，需在重建前删除。
 stale=()
-while IFS= read -r existing; do
-  [ -z "$existing" ] && continue
-  keep=false
-  for asset in "${expected_assets[@]}"; do
-    if [ "$existing" = "$asset" ]; then
-      keep=true
-      break
-    fi
-  done
-  if [ "$keep" = false ]; then
+for existing in ${present[@]+"${present[@]}"}; do
+  if ! contains "$existing" "${expected_assets[@]}"; then
     stale+=("$existing")
   fi
-done <<<"${ASSETS:-}"
+done
 
 emit "create_release=false"
 
@@ -92,10 +123,10 @@ if [ "${#stale[@]}" -gt 0 ]; then
   echo "Release $TAG 存在 ${#stale[@]} 项错误或陈旧资产，将删除："
   printf '  stale=%s\n' "${stale[@]}"
   emit "cleanup_assets=true"
-  emit "stale_assets=$(IFS=,; echo "${stale[*]}")"
+  emit_multiline "stale_assets" "${stale[@]}"
 else
   emit "cleanup_assets=false"
-  emit "stale_assets="
+  emit_multiline "stale_assets"
 fi
 
 if [ "${#missing[@]}" -eq 0 ] && [ "${#stale[@]}" -eq 0 ]; then

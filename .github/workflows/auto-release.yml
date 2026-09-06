@@ -116,14 +116,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          IFS=',' read -r -a names <<< "$STALE"
-          for name in "${names[@]}"; do
+          # 逐行读取：资产名本身可能含逗号，逗号分隔会把一个文件名拆成
+          # 两个不存在的名字，删除失败或漏删。
+          count=0
+          while IFS= read -r name; do
             [ -z "$name" ] && continue
             echo "删除错误/陈旧资产：$name"
             # 删除失败即显式失败：残留错误资产会污染 latest.json。
             gh release delete-asset "$TAG" "$name" --repo "$REPO" --yes
-          done
-          echo "已清理 ${#names[@]} 项资产。"
+            count=$((count + 1))
+          done <<< "$STALE"
+          echo "已清理 $count 项资产。"
 
   # 用 workflow_call 直接嵌套调用资产构建，而不是 `gh workflow run` 派发：
   # GITHUB_TOKEN 没有 actions:write，派发会以 HTTP 403 失败（见 run 34015804532），

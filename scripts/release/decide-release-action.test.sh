@@ -130,6 +130,61 @@ if grep -q 'stale=latest.json' <<<"$out_check"; then
   echo "FAIL: latest.json 被错误列入清理清单"
 fi
 
+# 用例 13：同一输入必须每次给出相同判定。
+# 曾因 `printf ... | grep -Fxq` 在 pipefail 下被 SIGPIPE 污染退出码
+# （grep 命中即退出，printf 收到 SIGPIPE 返回 141），导致完整 Release
+# 有约一半概率被误判为缺件并重建。单次运行无法暴露，必须重复采样。
+name="判定结果稳定：同一输入不得随机翻转"
+results="$(for _ in $(seq 1 30); do
+  TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true ASSETS="$(full_assets)" \
+    bash "$TARGET" 2>/dev/null | grep '^build_assets='
+done | sort -u)"
+if [ "$results" = "build_assets=false" ]; then
+  PASS=$((PASS + 1))
+  echo "PASS: $name"
+else
+  FAIL=$((FAIL + 1))
+  echo "FAIL: $name"
+  echo "    30 次运行出现多种结果：$(echo "$results" | tr '\n' ' ')"
+fi
+
+# 用例 14：资产名本身含逗号时，待删清单必须无损传递给 cleanup job。
+# 逗号分隔会把一个文件名拆成两个不存在的名字，导致删除失败、错误资产永久残留。
+name="含逗号的资产名无损传入 GITHUB_OUTPUT"
+# 必须放两项 stale：只放一项时，逗号拼接的结果与正确值字面相同，
+# 用例会对错误实现同样通过，没有鉴别力。
+tmp_out="$(mktemp)"
+TAG=v1.2.57 RELEASE_EXISTS=true REMOTE_TAG_EXISTS=true GITHUB_OUTPUT="$tmp_out" \
+  ASSETS="$(full_assets
+echo 'CodexPlusPlus-1.2.57-macos-arm64,old.zip'
+echo 'CodexPlusPlus-1.2.56-windows-x64.zip')" \
+  bash "$TARGET" >/dev/null 2>&1
+# 从 GITHUB_OUTPUT 中还原 stale_assets 的值（多行 output 用 heredoc 语法）
+restored="$(python3 - "$tmp_out" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^stale_assets<<(\S+)\n(.*?)\n\1$", text, re.S | re.M)
+if m:
+    print(m.group(2))
+else:
+    m = re.search(r"^stale_assets=(.*)$", text, re.M)
+    print(m.group(1) if m else "")
+PY
+)"
+expected_restored="$(printf 'CodexPlusPlus-1.2.57-macos-arm64,old.zip\nCodexPlusPlus-1.2.56-windows-x64.zip')"
+# 逐行还原后必须恰好 2 项，且含逗号的那项保持完整。
+if [ "$(printf '%s\n' "$restored" | sort)" = "$(printf '%s\n' "$expected_restored" | sort)" ] \
+  && [ "$(printf '%s\n' "$restored" | wc -l)" = 2 ]; then
+  PASS=$((PASS + 1))
+  echo "PASS: $name"
+else
+  FAIL=$((FAIL + 1))
+  echo "FAIL: $name"
+  echo "    期望 2 项（含 'CodexPlusPlus-1.2.57-macos-arm64,old.zip' 完整保留）"
+  echo "    实际：$(printf '%s' "$restored" | tr '\n' '|')"
+fi
+rm -f "$tmp_out"
+
 # 用例 7：期望资产清单必须与打包脚本/workflow 实际产出的文件名模板一致，
 # 否则 verify 会因为对不上名字而永远判定“资产不完整”。
 ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

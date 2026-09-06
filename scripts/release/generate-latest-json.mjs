@@ -50,16 +50,25 @@ export function buildPayload(release, repo, fallbackTag) {
 // import.meta.url 是解析过符号链接的 realpath，而 process.argv[1] 不是；
 // 若路径中任一段是符号链接，直接比较两者会永远不相等，导致本脚本以退出码 0
 // 静默不生成 latest.json。因此两边都归一到 realpath 再比较。
+// realpath 解析失败时不吞异常：静默返回 false 会让脚本以退出码 0 结束却不
+// 生成 latest.json，CI 里表现为「步骤成功但文件不存在」，是最难查的失败形态。
+// 退回未解析路径的比较，仍无法判定才显式报错。
 function isMainModule() {
   if (!process.argv[1]) {
     return false;
   }
+  const entryRaw = path.resolve(process.argv[1]);
+  const selfRaw = fileURLToPath(import.meta.url);
   try {
-    const entry = fs.realpathSync(path.resolve(process.argv[1]));
-    const self = fs.realpathSync(fileURLToPath(import.meta.url));
-    return entry === self;
-  } catch {
-    return false;
+    return fs.realpathSync(entryRaw) === fs.realpathSync(selfRaw);
+  } catch (error) {
+    if (entryRaw === selfRaw) {
+      return true;
+    }
+    throw new Error(
+      `无法判定脚本入口（realpath 解析失败）：${error.message}；` +
+        `argv[1]=${entryRaw}，self=${selfRaw}`
+    );
   }
 }
 
