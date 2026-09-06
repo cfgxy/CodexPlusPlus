@@ -14,8 +14,15 @@ permissions:
   contents: write
 
 jobs:
+  # main push 不再触发 pr-build.yml，发布链的脚本测试改由本工作流自己跑：
+  # 判定脚本出错会直接造成错误发布，不能只在 PR 上把关。
+  release-scripts:
+    uses: ./.github/workflows/release-scripts.yml
+
   plan:
     name: Plan release action
+    # 判定脚本没通过测试就不进入发布：它决定 Release 建不建、资产删不删。
+    needs: release-scripts
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}

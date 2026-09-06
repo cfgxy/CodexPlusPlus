@@ -125,6 +125,97 @@ else
   ng "latest-json 注释与实现一致（确有 ref 配置）"
 fi
 
+# 断言 7：一次 main push 只能触发一条打包链。
+# pr-build.yml 与 auto-release.yml 都会构建 Windows / macOS x64 / macOS arm64；
+# 若两者同时监听 main push，同一次推送会把三份包各构建两遍，白烧一倍额度，
+# 且两条链产出的产物无人比对，语义上也说不清哪份才是准的。
+# 发布链（auto-release.yml）是 main push 后唯一自动打包入口。
+if python3 - <<'PY'
+import sys, yaml, glob
+
+def triggers(path):
+    d = yaml.safe_load(open(path, encoding="utf-8"))
+    on = d.get("on", d.get(True))
+    return (on if isinstance(on, dict) else {k: None for k in on}), d
+
+# 会产出安装包的 job 名（各 workflow 内）
+PACKAGING = {"windows-artifacts", "macos-dmg", "windows-installer", "release-assets"}
+
+offenders = []
+for path in sorted(glob.glob(".github/workflows/*.yml")):
+    on, d = triggers(path)
+    push = on.get("push")
+    if not isinstance(push, dict):
+        continue
+    if "main" not in (push.get("branches") or []):
+        continue
+    packaging_jobs = sorted(set(d.get("jobs", {})) & PACKAGING)
+    if packaging_jobs:
+        offenders.append((path, packaging_jobs))
+
+if len(offenders) != 1:
+    print("监听 main push 且会打包的 workflow 必须恰好 1 个，实际：")
+    for path, jobs in offenders:
+        print(f"  {path} -> {jobs}")
+    sys.exit(1)
+if offenders[0][0] != ".github/workflows/auto-release.yml":
+    print(f"main push 的唯一打包入口应为 auto-release.yml，实际：{offenders[0][0]}")
+    sys.exit(1)
+PY
+then
+  ok "main push 只触发一条打包链（auto-release.yml）"
+else
+  ng "main push 只触发一条打包链（auto-release.yml）"
+fi
+
+# 断言 8：去掉 main push 不得牵连 PR 校验与手动入口——
+# PR 上的 Windows/macOS 构建验证是拦截问题的主要手段，必须保留。
+if python3 - <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(".github/workflows/pr-build.yml", encoding="utf-8"))
+on = d.get("on", d.get(True))
+on = on if isinstance(on, dict) else {k: None for k in on}
+missing = [t for t in ("pull_request", "workflow_dispatch") if t not in on]
+if missing:
+    print(f"pr-build.yml 缺少必须保留的触发方式：{missing}")
+    sys.exit(1)
+for job in ("windows-artifacts", "macos-dmg", "release-scripts"):
+    if job not in d.get("jobs", {}):
+        print(f"pr-build.yml 缺少 job：{job}")
+        sys.exit(1)
+PY
+then
+  ok "pr-build.yml 保留 PR 校验与手动触发及三个 job"
+else
+  ng "pr-build.yml 保留 PR 校验与手动触发及三个 job"
+fi
+
+# 断言 9：main push 不再跑 pr-build.yml，发布链必须自己跑脚本测试。
+# 判定脚本决定 Release 建不建、资产删不删，未经测试就发布等于把把关环节
+# 从正式发布路径上摘掉；plan 必须依赖它，否则测试与发布并行、失败也拦不住。
+if python3 - <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(".github/workflows/auto-release.yml", encoding="utf-8"))
+jobs = d.get("jobs", {})
+job = jobs.get("release-scripts")
+if not job:
+    print("auto-release.yml 缺少 release-scripts job")
+    sys.exit(1)
+if "release-scripts.yml" not in str(job.get("uses", "")):
+    print(f"release-scripts job 应复用 release-scripts.yml，实际：{job.get('uses')}")
+    sys.exit(1)
+needs = jobs.get("plan", {}).get("needs")
+needs = [needs] if isinstance(needs, str) else (needs or [])
+if "release-scripts" not in needs:
+    print(f"plan 未依赖 release-scripts，测试失败拦不住发布：needs={needs}")
+    sys.exit(1)
+PY
+then
+  ok "auto-release.yml 在发布前自跑脚本测试且 plan 依赖它"
+else
+  ng "auto-release.yml 在发布前自跑脚本测试且 plan 依赖它"
+fi
+
 echo
 echo "通过 $PASS 项，失败 $FAIL 项。"
 [ "$FAIL" = 0 ]
