@@ -110,6 +110,7 @@ import {
   type ModelWindowRow,
 } from "./model-windows";
 import { relayAuthForLiveDraft, shouldBackfillRelayProfileBeforeSwitch } from "./relay-live-files";
+import { maskSecretValue } from "./mask-secret";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
 import { resolveLaunchStatus } from "./launch-status";
 import {
@@ -613,6 +614,8 @@ type ProviderImportRequest = {
   name: string;
   baseUrl: string;
   apiKey: string;
+  model: string;
+  importId: string;
   wireApi: string;
   relayMode: string;
   configContents: string;
@@ -621,7 +624,12 @@ type ProviderImportRequest = {
 
 type PendingProviderImportResult = CommandResult<{
   pending: ProviderImportRequest | null;
+  keyChanged: boolean | null;
+  error: string | null;
 }>;
+
+type PendingProviderModelsResult = CommandResult<{ models: string[] }>;
+type PendingProviderBillingResult = CommandResult<{ multiplier: string }>;
 
 type EnvConflict = {
   name: string;
@@ -1047,6 +1055,9 @@ export function App() {
   const [relayEnvironment, setRelayEnvironment] = useState<RelayEnvironmentResult | null>(null);
   const [ccsProviders, setCcsProviders] = useState<CcsProvidersResult | null>(null);
   const [pendingProviderImport, setPendingProviderImport] = useState<ProviderImportRequest | null>(null);
+  const [pendingProviderKeyChanged, setPendingProviderKeyChanged] = useState<boolean | null>(null);
+  const activeImportIdRef = useRef<string | null>(null);
+  const pendingImportRefreshEpoch = useRef(0);
   const [localSessions, setLocalSessions] = useState<LocalSessionsResult | null>(null);
   const [sessionShareUrl, setSessionShareUrl] = useState("");
   const [zedRemoteProjects, setZedRemoteProjects] = useState<ZedRemoteProjectsResult | null>(null);
@@ -1306,30 +1317,72 @@ export function App() {
   };
 
   const refreshPendingProviderImport = async (silent = true) => {
+    const epoch = ++pendingImportRefreshEpoch.current;
     const result = await run(() => call<PendingProviderImportResult>("load_pending_provider_import"));
-    if (result) {
+    if (result && epoch === pendingImportRefreshEpoch.current) {
       setPendingProviderImport(result.pending);
+      setPendingProviderKeyChanged(result.keyChanged);
+      if (result.error) showNotice(t("Codex++ 导入"), result.error, "failed");
+      if (result.pending?.importId && activeImportIdRef.current !== result.pending.importId) {
+        activeImportIdRef.current = result.pending.importId;
+        setRoute("relay");
+      }
+      if (!result.pending) activeImportIdRef.current = null;
       if (!silent && !isSuccessStatus(result.status)) showResultNotice(t("Codex++ 导入"), result, { silentSuccess: true });
     }
     return result;
   };
 
-  const confirmPendingProviderImport = async () => {
-    const result = await run(() => call<SettingsResult>("confirm_pending_provider_import"));
+  const confirmPendingProviderImport = async (importId: string, replaceKey: boolean, multiplier: string | null, models: string[] | null, selectedModel: string) => {
+    const result = await run(() => call<SettingsResult>("confirm_pending_provider_import", {
+      importId,
+      replaceKey,
+      multiplier,
+      models,
+      selectedModel,
+    }));
     if (result) {
-      setPendingProviderImport(null);
-      setSettings(result);
-      setSettingsForm(normalizeSettings(result.settings));
+      if (isSuccessStatus(result.status)) {
+        pendingImportRefreshEpoch.current += 1;
+        setPendingProviderImport(null);
+        setPendingProviderKeyChanged(null);
+        setSettings(result);
+        setSettingsForm(normalizeSettings(result.settings));
+      } else {
+        await refreshPendingProviderImport(true);
+      }
       showResultNotice(t("Codex++ 导入"), result);
       await refreshCcsProviders(true);
     }
   };
 
-  const dismissPendingProviderImport = async () => {
-    const result = await run(() => call<PendingProviderImportResult>("dismiss_pending_provider_import"));
+  const dismissPendingProviderImport = async (importId: string) => {
+    const result = await run(() => call<PendingProviderImportResult>("dismiss_pending_provider_import", { importId }));
     if (result) {
-      setPendingProviderImport(null);
-      showResultNotice(t("Codex++ 导入"), result, { silentSuccess: true });
+      if (isSuccessStatus(result.status)) {
+        pendingImportRefreshEpoch.current += 1;
+        setPendingProviderImport(null);
+        setPendingProviderKeyChanged(null);
+      } else {
+        await refreshPendingProviderImport(true);
+      }
+      showResultNotice(t("Codex++ 导入"), result);
+    }
+  };
+
+  const fetchPendingProviderModels = async (importId: string) => {
+    try {
+      return await call<PendingProviderModelsResult>("fetch_pending_provider_models", { importId });
+    } catch {
+      return { status: "failed", message: t("获取上游模型失败，请稍后重试。"), models: [] };
+    }
+  };
+
+  const fetchPendingProviderBilling = async (importId: string) => {
+    try {
+      return await call<PendingProviderBillingResult>("fetch_pending_provider_billing", { importId });
+    } catch {
+      return { status: "failed", message: t("获取倍率失败，请稍后重试。"), multiplier: "" };
     }
   };
 
@@ -1930,6 +1983,16 @@ export function App() {
     if (!skipDreamSkinDraftGuard && route === "dreamSkin" && next !== "dreamSkin" && dreamSkinDraftDirty) {
       runAfterDreamSkinDraftGuard(() => void navigate(next, true));
       return;
+    }
+    if (pendingProviderImport && next !== "relay") {
+      const cancelled = await run(() => call<PendingProviderImportResult>("dismiss_pending_provider_import", { importId: pendingProviderImport.importId }));
+      if (!cancelled || !isSuccessStatus(cancelled.status)) {
+        showNotice(t("Codex++ 导入"), t("取消导入失败，请重试。"), "failed");
+        return;
+      }
+      pendingImportRefreshEpoch.current += 1;
+      setPendingProviderImport(null);
+      setPendingProviderKeyChanged(null);
     }
     setRoute(next);
     if (next === "overview") await refreshOverview(true);
@@ -3356,6 +3419,12 @@ export function App() {
               ccsProviders={ccsProviders}
               form={settingsForm}
               actions={actions}
+              providerImport={pendingProviderImport}
+              providerKeyChanged={pendingProviderKeyChanged}
+              onImportConfirm={confirmPendingProviderImport}
+              onImportDismiss={dismissPendingProviderImport}
+              onImportModels={fetchPendingProviderModels}
+              onImportBilling={fetchPendingProviderBilling}
             />
           ) : null}
           {route === "relayEnvironment" ? (
@@ -3521,13 +3590,6 @@ export function App() {
             setDreamSkinUnsavedDialog(false);
             pending?.();
           })()}
-        />
-      ) : null}
-      {pendingProviderImport ? (
-        <PendingProviderImportDialog
-          request={pendingProviderImport}
-          onConfirm={() => void confirmPendingProviderImport()}
-          onDismiss={() => void dismissPendingProviderImport()}
         />
       ) : null}
       {pendingDreamSkinCommunity ? (
@@ -4284,6 +4346,12 @@ function RelayScreen({
   ccsProviders,
   form,
   actions,
+  providerImport,
+  providerKeyChanged,
+  onImportConfirm,
+  onImportDismiss,
+  onImportModels,
+  onImportBilling,
 }: {
   settings: SettingsResult | null;
   relayFiles: RelayFilesResult | null;
@@ -4291,9 +4359,18 @@ function RelayScreen({
   ccsProviders: CcsProvidersResult | null;
   form: BackendSettings;
   actions: Actions;
+  providerImport: ProviderImportRequest | null;
+  providerKeyChanged: boolean | null;
+  onImportConfirm: (importId: string, replaceKey: boolean, multiplier: string | null, models: string[] | null, selectedModel: string) => Promise<void>;
+  onImportDismiss: (importId: string) => Promise<void>;
+  onImportModels: (importId: string) => Promise<PendingProviderModelsResult>;
+  onImportBilling: (importId: string) => Promise<PendingProviderBillingResult>;
 }) {
   const normalized = normalizeSettings(form);
   const [detailProfileId, setDetailProfileId] = useState<string | null>(null);
+  useEffect(() => {
+    if (providerImport) setDetailProfileId(null);
+  }, [providerImport?.importId]);
   const [newProfileDraft, setNewProfileDraft] = useState<RelayProfile | null>(null);
   const [thirdPartyImportOpen, setThirdPartyImportOpen] = useState(false);
   const detailProfile = newProfileDraft || (detailProfileId
@@ -4335,6 +4412,22 @@ function RelayScreen({
     setThirdPartyImportOpen((open) => !open);
     if (!ccsProviders) void actions.refreshCcsProviders(true);
   };
+
+  if (providerImport) {
+    return (
+      <ProviderImportPreview
+        key={providerImport.importId}
+        request={providerImport}
+        keyChanged={providerKeyChanged}
+        form={normalized}
+        actions={actions}
+        onConfirm={onImportConfirm}
+        onDismiss={onImportDismiss}
+        onModels={onImportModels}
+        onBilling={onImportBilling}
+      />
+    );
+  }
 
   if (detailProfile) {
     return (
@@ -4438,6 +4531,148 @@ function RelayScreen({
         </CardContent>
       </Panel>
     </>
+  );
+}
+
+type ImportFetchState = { status: "loading" | "ok" | "failed"; message: string };
+
+function ProviderImportPreview({ request, keyChanged, form, actions, onConfirm, onDismiss, onModels, onBilling }: {
+  request: ProviderImportRequest;
+  keyChanged: boolean | null;
+  form: BackendSettings;
+  actions: Actions;
+  onConfirm: (importId: string, replaceKey: boolean, multiplier: string | null, models: string[] | null, selectedModel: string) => Promise<void>;
+  onDismiss: (importId: string) => Promise<void>;
+  onModels: (importId: string) => Promise<PendingProviderModelsResult>;
+  onBilling: (importId: string) => Promise<PendingProviderBillingResult>;
+}) {
+  const [draft, setDraft] = useState<RelayProfile>(() => withGeneratedRelayFiles({
+    ...createRelayProfile(form),
+    name: request.name,
+    model: request.model,
+    baseUrl: request.baseUrl,
+    upstreamBaseUrl: request.baseUrl,
+    apiKey: request.apiKey,
+    protocol: "responses",
+    relayMode: "pureApi",
+    sub2apiEnabled: true,
+  }));
+  const [rows, setRows] = useState<ModelWindowRow[]>(() =>
+    modelWindowRowsFromProfile("", "", "", ""),
+  );
+  const [billing, setBilling] = useState<ImportFetchState>({ status: "loading", message: t("正在获取倍率…") });
+  const [models, setModels] = useState<ImportFetchState>({ status: "loading", message: t("正在获取上游模型…") });
+  const [multiplierValue, setMultiplierValue] = useState<string | null>(null);
+  const [modelValues, setModelValues] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const active = useRef(true);
+
+  const fetchBilling = async () => {
+    setBilling({ status: "loading", message: t("正在获取倍率…") });
+    const result = await onBilling(request.importId);
+    if (!active.current) return;
+    if (!isSuccessStatus(result.status)) {
+      setBilling({ status: "failed", message: result.message });
+      return;
+    }
+    setMultiplierValue(result.multiplier);
+    setDraft((current) => ({ ...current, sub2apiMultiplier: result.multiplier }));
+    setBilling({ status: "ok", message: result.message });
+  };
+
+  const fetchModels = async () => {
+    setModels({ status: "loading", message: t("正在获取上游模型…") });
+    const result = await onModels(request.importId);
+    if (!active.current) return;
+    if (!isSuccessStatus(result.status)) {
+      setModels({ status: "failed", message: result.message });
+      return;
+    }
+    setModelValues(result.models);
+    const fetchedRows: ModelWindowRow[] = result.models.map((model) => ({ model, window: "", autoCompact: "", imageHandling: "" }));
+    const merged = mergeModelWindowRows(rows, fetchedRows);
+    setRows(merged);
+    setDraft((current) => ({ ...current, modelList: merged.map((row) => row.model).filter(Boolean).join("\n") }));
+    setModels({ status: "ok", message: result.message });
+  };
+
+  useEffect(() => {
+    active.current = true;
+    void fetchBilling();
+    void fetchModels();
+    return () => { active.current = false; };
+  }, [request.importId]);
+
+  const finishImport = async (replaceKey: boolean) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onConfirm(request.importId, replaceKey, multiplierValue, modelValues, draft.model);
+    } finally {
+      if (active.current) setSaving(false);
+    }
+  };
+
+  const fetching = billing.status === "loading" || models.status === "loading";
+  return (
+    <div className="relay-detail-page provider-import-page">
+      <div className="relay-detail-header">
+        <div className="relay-editor-heading">
+          <Button aria-label={t("取消导入")} onClick={() => void onDismiss(request.importId)} size="icon" title={t("取消导入")} type="button" variant="ghost">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="relay-editor-heading-copy">
+            <strong>{t("添加自定义供应商")}</strong>
+            <span>{t("来自 Sub2API 一键导入")}</span>
+          </div>
+        </div>
+        <div className="relay-editor-actions">
+          {keyChanged ? (
+            <Button disabled={saving} onClick={() => void finishImport(false)} type="button" variant="secondary">{t("保留原 Key")}</Button>
+          ) : null}
+          <Button disabled={saving || fetching} onClick={() => void finishImport(keyChanged === true)} type="button">
+            <Save className="h-4 w-4" />
+            {saving ? t("保存中") : keyChanged ? t("替换 Key 并保存") : t("确认导入")}
+          </Button>
+          <Button disabled={saving} onClick={() => void onDismiss(request.importId)} type="button" variant="secondary">{t("取消")}</Button>
+        </div>
+      </div>
+      <div className="provider-import-source" role="note">
+        <span>{keyChanged === true ? t("同名、同地址的供应商使用不同 Key") : keyChanged === false ? t("同名、同地址的供应商已存在") : t("来自 Sub2API 一键导入")}</span>
+        <span>API Key：{maskSecret(request.apiKey)}</span>
+      </div>
+      <div className="provider-import-fetch" aria-live="polite">
+        <div><span>{billing.message}</span><Button disabled={billing.status === "loading"} onClick={() => void fetchBilling()} size="sm" title={t("重新获取倍率")} type="button" variant="secondary"><RefreshCw className="h-4 w-4" /></Button></div>
+        <div><span>{models.message}</span><Button disabled={models.status === "loading"} onClick={() => void fetchModels()} size="sm" title={t("重新获取上游模型")} type="button" variant="secondary"><RefreshCw className="h-4 w-4" /></Button></div>
+      </div>
+      <div className="provider-import-model">
+        <Field label={t("配置模型")}>
+          <Input
+            list="provider-import-model-options"
+            value={draft.model}
+            onChange={(event) => setDraft((current) => ({ ...current, model: event.currentTarget.value }))}
+            placeholder={t("例如 deepseek-v4-pro")}
+          />
+          <datalist id="provider-import-model-options">
+            {modelValues?.map((model) => <option key={model} value={model} />)}
+          </datalist>
+        </Field>
+      </div>
+      <div className="relay-detail-body">
+        <fieldset disabled className="provider-import-fields">
+          <RelayProfileEditor
+            profile={draft}
+            form={form}
+            isNew
+            onProfileChange={setDraft}
+            actions={actions}
+            modelWindowRows={rows}
+            setModelWindowRows={setRows}
+            showModelField={false}
+          />
+        </fieldset>
+      </div>
+    </div>
   );
 }
 
@@ -7172,6 +7407,7 @@ function RelayProfileEditor({
   actions,
   modelWindowRows,
   setModelWindowRows,
+  showModelField = true,
 }: {
   profile: RelayProfile;
   form: BackendSettings;
@@ -7180,6 +7416,7 @@ function RelayProfileEditor({
   actions: Actions;
   modelWindowRows: ModelWindowRow[];
   setModelWindowRows: (value: ModelWindowRow[]) => void;
+  showModelField?: boolean;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [vlmTestOpen, setVlmTestOpen] = useState(false);
@@ -7400,7 +7637,7 @@ function RelayProfileEditor({
             ]}
           />
         </Field>
-        <Field className="relay-field-config-model" label={t("配置模型")}>
+        {showModelField ? <Field className="relay-field-config-model" label={t("配置模型")}>
           <Input
             value={profile.model}
             onChange={(event) => updateDraft({ model: event.currentTarget.value })}
@@ -7409,7 +7646,7 @@ function RelayProfileEditor({
           <p className="field-hint">
             {t("默认启动 Codex 时使用的模型名，请勿带后缀；上下文窗口请在下方「模型列表」中按模型单独配置。")}
           </p>
-        </Field>
+        </Field> : null}
         <Field className="relay-field-goals" label={t("Codex 目标")}>
           <label className="inline-check">
             <input
@@ -9104,47 +9341,6 @@ function SessionIndexCleanupDialog({
   );
 }
 
-function PendingProviderImportDialog({
-  request,
-  onConfirm,
-  onDismiss,
-}: {
-  request: ProviderImportRequest;
-  onConfirm: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal-card provider-import-modal">
-        <div className="modal-head">
-          <div>
-            <h2>{t("导入 Codex++ 供应商")}</h2>
-            <p>{t("检测到来自网页的供应商配置导入请求，确认后会写入本机 Codex++ 管理工具。")}</p>
-          </div>
-          <button className="toast-close" onClick={onDismiss} type="button">×</button>
-        </div>
-        <div className="metric-list">
-          <Metric label={t("名称")} value={request.name || t("未命名供应商")} />
-          <Metric label="Base URL" value={request.baseUrl || t("未填写")} />
-          <Metric label={t("协议")} value={providerImportWireApiLabel(request.wireApi)} />
-          <Metric label={t("模式")} value={providerImportRelayModeLabel(request.relayMode)} />
-          <Metric label="API Key" value={maskSecret(request.apiKey)} />
-        </div>
-        <div className="hint-line" role="note">
-          {t("安全提示：网页链接中的自定义 config.toml 和 auth.json 不会执行；管理工具只会使用上方字段生成受管配置。")}
-        </div>
-        <Toolbar>
-          <Button onClick={onConfirm}>
-            <Download className="h-4 w-4" />
-            {t("确认导入")}
-          </Button>
-          <Button onClick={onDismiss} variant="secondary">{t("取消")}</Button>
-        </Toolbar>
-      </div>
-    </div>
-  );
-}
-
 function DreamSkinCommunityLinkDialog({
   versionId,
   onConfirm,
@@ -10367,10 +10563,7 @@ function providerImportRelayModeLabel(value: string): string {
 }
 
 function maskSecret(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return t("未填写");
-  if (trimmed.length <= 10) return `${trimmed.slice(0, 2)}…${trimmed.slice(-2)}`;
-  return `${trimmed.slice(0, 6)}…${trimmed.slice(-4)}`;
+  return maskSecretValue(value, t("未填写"));
 }
 
 function relayProfileConfigBrief(profile: RelayProfile): string {

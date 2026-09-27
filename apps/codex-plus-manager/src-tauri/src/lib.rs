@@ -108,6 +108,8 @@ pub fn run() {
             commands::load_pending_provider_import,
             commands::confirm_pending_provider_import,
             commands::dismiss_pending_provider_import,
+            commands::fetch_pending_provider_models,
+            commands::fetch_pending_provider_billing,
             commands::list_local_sessions,
             commands::import_local_session,
             commands::load_pending_session_share,
@@ -193,7 +195,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = event {
                 for url in urls {
-                    if handle_session_share_url(url.as_str()) || handle_dream_skin_url(url.as_str())
+                    if handle_session_share_url(url.as_str())
+                        || handle_dream_skin_url(url.as_str())
+                        || handle_provider_import_url(url.as_str())
                     {
                         show_main_window(app_handle);
                     }
@@ -253,6 +257,32 @@ pub fn handle_session_share_url(url: &str) -> bool {
             false
         }
     }
+}
+
+pub fn handle_provider_import_url(url: &str) -> bool {
+    if !url
+        .get(.."codexplusplus://".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("codexplusplus://"))
+        || url.starts_with("codexplusplus://session")
+    {
+        return false;
+    }
+    match codex_plus_core::provider_import::save_pending_provider_import_from_url(url) {
+        Ok(_) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "manager.provider_import_url.pending",
+                serde_json::json!({}),
+            );
+        }
+        Err(_) => {
+            let _ = codex_plus_core::provider_import::record_invalid_provider_import();
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "manager.provider_import_url.failed",
+                serde_json::json!({ "category": "invalid_import" }),
+            );
+        }
+    }
+    true
 }
 
 fn install_tray<R: tauri::Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {

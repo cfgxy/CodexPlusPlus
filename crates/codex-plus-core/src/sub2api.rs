@@ -39,6 +39,19 @@ struct Sub2ApiBillingResponse {
 pub async fn fetch_sub2api_billing_info(
     profile: &RelayProfile,
 ) -> anyhow::Result<Sub2ApiBillingInfo> {
+    fetch_sub2api_billing_info_with_client(
+        profile,
+        crate::http_client::proxied_client(&profile.user_agent)?,
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn fetch_sub2api_billing_info_with_client(
+    profile: &RelayProfile,
+    client: reqwest::Client,
+    limited: bool,
+) -> anyhow::Result<Sub2ApiBillingInfo> {
     let base_url = if profile.upstream_base_url.trim().is_empty() {
         profile.base_url.trim()
     } else {
@@ -53,7 +66,6 @@ pub async fn fetch_sub2api_billing_info(
     }
 
     let endpoint = sub2api_billing_endpoint(base_url);
-    let client = crate::http_client::proxied_client(&profile.user_agent)?;
     let response = client
         .get(&endpoint)
         .bearer_auth(api_key)
@@ -62,7 +74,14 @@ pub async fn fetch_sub2api_billing_info(
         .await
         .with_context(|| format!("请求 {endpoint} 失败"))?;
     let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    if limited && !status.is_success() {
+        anyhow::bail!("倍率接口返回 HTTP {}", status.as_u16());
+    }
+    let body = if limited {
+        String::from_utf8(crate::provider_import::read_preview_response(response).await?)?
+    } else {
+        response.text().await.unwrap_or_default()
+    };
     if !status.is_success() {
         anyhow::bail!(
             "HTTP {}：{}",

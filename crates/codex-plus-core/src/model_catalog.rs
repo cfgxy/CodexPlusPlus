@@ -564,6 +564,19 @@ fn responses_api_status(status: &str, endpoint: &str, message: &str) -> Value {
 pub async fn fetch_relay_profile_model_ids(
     profile: &RelayProfile,
 ) -> anyhow::Result<(Vec<String>, String)> {
+    fetch_relay_profile_model_ids_with_client(
+        profile,
+        crate::http_client::proxied_client(&profile.user_agent)?,
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn fetch_relay_profile_model_ids_with_client(
+    profile: &RelayProfile,
+    client: reqwest::Client,
+    limited: bool,
+) -> anyhow::Result<(Vec<String>, String)> {
     let source = ModelSource {
         source_id: format!("relay-profile:{}", profile.id),
         source_type: "relay_profile".to_string(),
@@ -583,7 +596,24 @@ pub async fn fetch_relay_profile_model_ids(
         anyhow::bail!("Base URL 不能为空");
     }
     let endpoint = models_endpoint(&source.base_url);
-    let client = crate::http_client::proxied_client(&profile.user_agent)?;
+    if limited {
+        let response = client
+            .get(&endpoint)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .bearer_auth(&source.api_key)
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            anyhow::bail!("上游模型接口返回 HTTP {}", response.status().as_u16());
+        }
+        let bytes = crate::provider_import::read_preview_response(response).await?;
+        let payload: Value = serde_json::from_slice(&bytes)?;
+        let models = unique_strings(parse_model_payload(&payload));
+        if models.is_empty() {
+            anyhow::bail!("上游没有返回可用模型");
+        }
+        return Ok((models, endpoint));
+    }
     let (models, status) = fetch_models_from_source(&client, &source).await;
     if models.is_empty() {
         let message = status
