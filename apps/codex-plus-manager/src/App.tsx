@@ -1348,6 +1348,8 @@ export function App() {
         setPendingProviderKeyChanged(null);
         setSettings(result);
         setSettingsForm(normalizeSettings(result.settings));
+        await refreshRelay(true);
+        await refreshRelayFiles(true);
       } else {
         await refreshPendingProviderImport(true);
       }

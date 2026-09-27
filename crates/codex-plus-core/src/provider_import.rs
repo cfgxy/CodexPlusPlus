@@ -156,6 +156,65 @@ pub fn confirm_pending_provider_import_with_options_at(
     result
 }
 
+pub fn confirm_pending_provider_import_with_options_in_home_at(
+    path: &Path,
+    store: SettingsStore,
+    home: &Path,
+    import_id: &str,
+    replace_key: bool,
+    multiplier: Option<String>,
+    models: Option<Vec<String>>,
+    selected_model: Option<String>,
+) -> anyhow::Result<ProviderImportResult> {
+    let mut request = checked_pending_at(path, import_id)?;
+    if let Some(model) = selected_model {
+        request.model = model;
+    }
+    let result = (|| {
+        let mut settings = store.load()?;
+        let previous_active_relay_id = settings.active_relay_id.clone();
+        let identity = provider_identity(&request.name, &request.base_url);
+        if replace_key {
+            if let Some(active) = settings.relay_profiles.iter_mut().find(|profile| {
+                profile.id == previous_active_relay_id
+                    && provider_identity(
+                        &profile.name,
+                        if profile.upstream_base_url.is_empty() {
+                            &profile.base_url
+                        } else {
+                            &profile.upstream_base_url
+                        },
+                    ) == identity
+                    && profile.api_key != request.api_key
+            }) {
+                crate::relay_config::backfill_relay_profile_from_home_with_common(
+                    home,
+                    active,
+                    &mut settings.relay_context_config_contents,
+                )?;
+            }
+        }
+
+        let result =
+            prepare_import_provider(request, &mut settings, replace_key, multiplier, models)?;
+        if result.imported {
+            if settings.active_relay_id == result.profile_id {
+                crate::relay_switch::switch_relay_profile_in_home(
+                    &store,
+                    home,
+                    settings,
+                    &previous_active_relay_id,
+                )?;
+            } else {
+                store.save(&settings)?;
+            }
+        }
+        Ok(result)
+    })();
+    clear_pending_provider_import_at(path)?;
+    result
+}
+
 fn checked_pending_at(path: &Path, import_id: &str) -> anyhow::Result<ProviderImportRequest> {
     let request = load_pending_provider_import_at(path)?.context("没有待确认的供应商导入")?;
     if import_id.is_empty() || request.import_id != import_id {
@@ -368,8 +427,22 @@ pub fn import_provider_with_store_and_options(
     multiplier: Option<String>,
     models: Option<Vec<String>>,
 ) -> anyhow::Result<ProviderImportResult> {
-    let request = normalize_request(request)?;
     let mut settings = store.load()?;
+    let result = prepare_import_provider(request, &mut settings, replace_key, multiplier, models)?;
+    if result.imported {
+        store.save(&settings)?;
+    }
+    Ok(result)
+}
+
+fn prepare_import_provider(
+    request: ProviderImportRequest,
+    settings: &mut crate::settings::BackendSettings,
+    replace_key: bool,
+    multiplier: Option<String>,
+    models: Option<Vec<String>>,
+) -> anyhow::Result<ProviderImportResult> {
+    let request = normalize_request(request)?;
     let identity = provider_identity(&request.name, &request.base_url);
     if let Some(existing) = settings.relay_profiles.iter_mut().find(|profile| {
         provider_identity(
@@ -399,7 +472,6 @@ pub fn import_provider_with_store_and_options(
                 profile_id: existing.id.clone(),
                 profile_name: existing.name.clone(),
             };
-            store.save(&settings)?;
             return Ok(result);
         }
         return Ok(ProviderImportResult {
@@ -427,7 +499,6 @@ pub fn import_provider_with_store_and_options(
     };
     settings.relay_profiles.push(profile);
     settings.active_relay_id = result.profile_id.clone();
-    store.save(&settings)?;
     Ok(result)
 }
 
@@ -1026,6 +1097,204 @@ mod tests {
         assert_eq!(loaded.relay_profiles.len(), 2);
         assert_eq!(loaded.relay_profiles[1].api_key, "sk-new");
         assert_eq!(loaded.active_relay_id, first.profile_id);
+    }
+
+    #[test]
+    fn confirming_new_provider_applies_live_and_preserves_previous_profile_on_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("codex");
+        let pending = dir.path().join("pending.json");
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        let old = request_from_url("codexplusplus://v1/import/provider?resource=provider&name=Old&baseUrl=https%3A%2F%2Fold.example%2Fv1&apiKey=sk-old&wireApi=responses&relayMode=pureApi").unwrap();
+        let old_id = import_provider_with_store(old, store.clone())
+            .unwrap()
+            .profile_id;
+        let original = store.load().unwrap();
+        crate::relay_config::apply_relay_profile_to_home_with_switch_rules(
+            &home,
+            &original.active_relay_profile(),
+            "",
+        )
+        .unwrap();
+        let old_live = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!("model_reasoning_effort = \"high\"\n{old_live}"),
+        )
+        .unwrap();
+        let mut request = request_from_url("codexplusplus://v1/import/provider?resource=provider&name=New&baseUrl=https%3A%2F%2Fnew.example%2Fv1&apiKey=sk-new&wireApi=responses&relayMode=pureApi&model=gpt-new").unwrap();
+        request.import_id = "new-import".into();
+        save_pending_provider_import_at(&pending, &request).unwrap();
+
+        let result = confirm_pending_provider_import_with_options_in_home_at(
+            &pending,
+            store.clone(),
+            &home,
+            "new-import",
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let settings = store.load().unwrap();
+        assert!(!pending.exists());
+        assert_eq!(settings.active_relay_id, result.profile_id);
+        assert!(
+            settings
+                .relay_profiles
+                .iter()
+                .find(|profile| profile.id == old_id)
+                .unwrap()
+                .config_contents
+                .contains("model_reasoning_effort = \"high\"")
+        );
+        assert!(
+            std::fs::read_to_string(home.join("config.toml"))
+                .unwrap()
+                .contains("https://new.example/v1")
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(home.join("auth.json")).unwrap()
+            )
+            .unwrap()["OPENAI_API_KEY"],
+            "sk-new"
+        );
+
+        let mut next = settings;
+        next.active_relay_id = old_id;
+        crate::relay_switch::switch_relay_profile_in_home(&store, &home, next, &result.profile_id)
+            .unwrap();
+        assert!(
+            std::fs::read_to_string(home.join("config.toml"))
+                .unwrap()
+                .contains("model_reasoning_effort = \"high\"")
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(home.join("auth.json")).unwrap()
+            )
+            .unwrap()["OPENAI_API_KEY"],
+            "sk-old"
+        );
+        assert_eq!(
+            store
+                .load()
+                .unwrap()
+                .relay_profiles
+                .iter()
+                .find(|profile| profile.id == result.profile_id)
+                .unwrap()
+                .api_key,
+            "sk-new"
+        );
+    }
+
+    #[test]
+    fn replacing_active_provider_key_updates_live_and_survives_following_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("codex");
+        let pending = dir.path().join("pending.json");
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        let mut request = request_from_url("codexplusplus://v1/import/provider?resource=provider&name=Active&baseUrl=https%3A%2F%2Factive.example%2Fv1&apiKey=sk-old&wireApi=responses&relayMode=pureApi").unwrap();
+        request.import_id = "initial".into();
+        save_pending_provider_import_at(&pending, &request).unwrap();
+        let initial = confirm_pending_provider_import_with_options_in_home_at(
+            &pending,
+            store.clone(),
+            &home,
+            "initial",
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let live = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!("model_reasoning_effort = \"high\"\n{live}"),
+        )
+        .unwrap();
+        request.api_key = "sk-replaced".into();
+        request.import_id = "replace".into();
+        save_pending_provider_import_at(&pending, &request).unwrap();
+
+        let replaced = confirm_pending_provider_import_with_options_in_home_at(
+            &pending,
+            store.clone(),
+            &home,
+            "replace",
+            true,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(replaced.replaced);
+        assert_eq!(replaced.profile_id, initial.profile_id);
+        let live = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(live.contains("model_reasoning_effort = \"high\""));
+        assert!(live.contains("sk-replaced"));
+        assert!(!live.contains("sk-old"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &std::fs::read_to_string(home.join("auth.json")).unwrap()
+            )
+            .unwrap()["OPENAI_API_KEY"],
+            "sk-replaced"
+        );
+
+        let mut next = store.load().unwrap();
+        next.active_relay_id = "default".into();
+        crate::relay_switch::switch_relay_profile_in_home(&store, &home, next, &initial.profile_id)
+            .unwrap();
+        let saved = store.load().unwrap();
+        let profile = saved
+            .relay_profiles
+            .iter()
+            .find(|profile| profile.id == initial.profile_id)
+            .unwrap();
+        assert_eq!(profile.api_key, "sk-replaced");
+        assert!(
+            profile
+                .config_contents
+                .contains("model_reasoning_effort = \"high\"")
+        );
+        assert!(profile.auth_contents.contains("sk-replaced"));
+        assert!(!profile.auth_contents.contains("sk-old"));
+    }
+
+    #[test]
+    fn confirming_with_unavailable_live_home_preserves_original_settings_and_cleans_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("codex");
+        std::fs::write(&home, "not a directory").unwrap();
+        let pending = dir.path().join("pending.json");
+        let store = SettingsStore::new(dir.path().join("settings.json"));
+        let original = store.load().unwrap();
+        store.save(&original).unwrap();
+        let mut request = request_from_url("codexplusplus://v1/import/provider?resource=provider&name=New&baseUrl=https%3A%2F%2Fnew.example%2Fv1&apiKey=sk-new&wireApi=responses&relayMode=pureApi").unwrap();
+        request.import_id = "broken-home".into();
+        save_pending_provider_import_at(&pending, &request).unwrap();
+
+        assert!(
+            confirm_pending_provider_import_with_options_in_home_at(
+                &pending,
+                store.clone(),
+                &home,
+                "broken-home",
+                false,
+                None,
+                None,
+                None,
+            )
+            .is_err()
+        );
+        assert!(!pending.exists());
+        assert_eq!(store.load().unwrap(), original);
+        assert_eq!(std::fs::read_to_string(&home).unwrap(), "not a directory");
     }
 
     #[test]

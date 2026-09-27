@@ -2343,7 +2343,17 @@ pub fn confirm_pending_provider_import(
     models: Option<Vec<String>>,
     selected_model: Option<String>,
 ) -> CommandResult<SettingsPayload> {
-    match codex_plus_core::provider_import::confirm_pending_provider_import_with_options(
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            settings_payload_value().unwrap_or_else(|(_, payload)| payload),
+        );
+    };
+    let home = codex_plus_core::relay_config::default_codex_home_dir();
+    match codex_plus_core::provider_import::confirm_pending_provider_import_with_options_in_home_at(
+        &codex_plus_core::paths::default_pending_provider_import_path(),
+        SettingsStore::default(),
+        &home,
         &import_id,
         replace_key,
         multiplier,
@@ -2363,7 +2373,7 @@ pub fn confirm_pending_provider_import(
             settings_payload(message, "供应商导入后重新读取设置失败")
         }
         Err(_) => failed(
-            "导入供应商配置失败，请检查本机设置并重新发起导入。",
+            "导入供应商配置失败，请检查本机设置与 Codex 配置文件后重新发起导入。",
             settings_payload_value().unwrap_or_else(|(_, payload)| payload),
         ),
     }

@@ -4,6 +4,7 @@ import test from "node:test";
 
 const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const desktop = readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const desktopCommands = readFileSync(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const importCore = readFileSync(new URL("../../../crates/codex-plus-core/src/provider_import.rs", import.meta.url), "utf8");
 
 test("冷启动和 macOS 已运行窗口都由相同协议解析入口接收", () => {
@@ -24,4 +25,10 @@ test("预览期两项获取独立启动且离开预览先清理待确认请求",
 test("Windows 待确认文件在写入 Key 前限制为当前用户访问", () => {
   assert.match(importCore, /let mut file = options\.open\(&temp\)\?;\s*#\[cfg\(windows\)\]\s*restrict_pending_file_to_current_user\(&temp\)\?;\s*file\.write_all\(&contents\)\?/);
   assert.match(importCore, /\.args\(\["\/inheritance:r", "\/grant:r"/);
+});
+
+test("导入确认与供应商切换共享写入锁并刷新 live 状态", () => {
+  assert.match(desktopCommands, /pub fn confirm_pending_provider_import\([\s\S]*?relay_switch_mutex\(\)\.lock\(\)[\s\S]*?confirm_pending_provider_import_with_options_in_home_at\(/);
+  assert.match(importCore, /confirm_pending_provider_import_with_options_in_home_at\([\s\S]*?switch_relay_profile_in_home\(/);
+  assert.match(source, /const confirmPendingProviderImport = async[\s\S]*?setSettingsForm\(normalizeSettings\(result\.settings\)\);\s*await refreshRelay\(true\);\s*await refreshRelayFiles\(true\);/);
 });
