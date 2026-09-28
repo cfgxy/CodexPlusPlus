@@ -189,6 +189,20 @@ pub struct CcsProvidersPayload {
 #[serde(rename_all = "camelCase")]
 pub struct PendingProviderImportPayload {
     pub pending: Option<codex_plus_core::provider_import::ProviderImportRequest>,
+    pub key_changed: Option<bool>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingProviderModelsPayload {
+    pub models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingProviderBillingPayload {
+    pub multiplier: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2276,47 +2290,152 @@ pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub fn load_pending_provider_import() -> CommandResult<PendingProviderImportPayload> {
+    let error = codex_plus_core::provider_import::take_provider_import_error();
     match codex_plus_core::provider_import::load_pending_provider_import() {
-        Ok(pending) => ok(
-            "待确认供应商导入已读取。",
-            PendingProviderImportPayload { pending },
-        ),
-        Err(error) => failed(
-            &format!("读取待确认供应商导入失败：{error}"),
-            PendingProviderImportPayload { pending: None },
+        Ok(pending) => {
+            let key_changed = match pending
+                .as_ref()
+                .map(|request| {
+                    codex_plus_core::provider_import::pending_import_key_changed(
+                        request,
+                        &SettingsStore::default(),
+                    )
+                })
+                .transpose()
+            {
+                Ok(key_changed) => key_changed.flatten(),
+                Err(_) => {
+                    return failed(
+                        "读取现有供应商失败，请检查本机设置后重试。",
+                        PendingProviderImportPayload {
+                            pending: None,
+                            key_changed: None,
+                            error,
+                        },
+                    );
+                }
+            };
+            ok(
+                "待确认供应商导入已读取。",
+                PendingProviderImportPayload {
+                    pending,
+                    key_changed,
+                    error,
+                },
+            )
+        }
+        Err(_) => failed(
+            "读取待确认供应商导入失败，请重新发起导入。",
+            PendingProviderImportPayload {
+                pending: None,
+                key_changed: None,
+                error,
+            },
         ),
     }
 }
 
 #[tauri::command]
-pub fn confirm_pending_provider_import() -> CommandResult<SettingsPayload> {
-    match codex_plus_core::provider_import::confirm_pending_provider_import() {
-        Ok(Some(result)) => {
-            let message = if result.imported {
-                format!("已导入供应商配置：{}。", result.profile_name)
+pub fn confirm_pending_provider_import(
+    import_id: String,
+    replace_key: bool,
+    multiplier: Option<String>,
+    models: Option<Vec<String>>,
+    selected_model: Option<String>,
+) -> CommandResult<SettingsPayload> {
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            settings_payload_value().unwrap_or_else(|(_, payload)| payload),
+        );
+    };
+    let home = codex_plus_core::relay_config::default_codex_home_dir();
+    match codex_plus_core::provider_import::confirm_pending_provider_import_with_options_in_home_at(
+        &codex_plus_core::paths::default_pending_provider_import_path(),
+        SettingsStore::default(),
+        &home,
+        &import_id,
+        replace_key,
+        multiplier,
+        models,
+        selected_model,
+    ) {
+        Ok(result) => {
+            let message = if result.replaced {
+                "已替换供应商 Key 并保存预览结果。"
+            } else if result.key_changed {
+                "未更新供应商，已保留原有 Key。"
+            } else if result.imported {
+                "已导入供应商配置并保存预览结果。"
             } else {
-                format!("供应商配置已存在：{}。", result.profile_name)
+                "该供应商已存在且配置一致，未重复创建。"
             };
-            settings_payload(&message, "供应商导入后重新读取设置失败")
+            settings_payload(message, "供应商导入后重新读取设置失败")
         }
-        Ok(None) => settings_payload("没有待确认的供应商导入。", "设置读取失败"),
-        Err(error) => failed(
-            &format!("导入供应商配置失败：{error}"),
+        Err(_) => failed(
+            "导入供应商配置失败，请检查本机设置与 Codex 配置文件后重新发起导入。",
             settings_payload_value().unwrap_or_else(|(_, payload)| payload),
         ),
     }
 }
 
 #[tauri::command]
-pub fn dismiss_pending_provider_import() -> CommandResult<PendingProviderImportPayload> {
-    match codex_plus_core::provider_import::clear_pending_provider_import() {
+pub fn dismiss_pending_provider_import(
+    import_id: String,
+) -> CommandResult<PendingProviderImportPayload> {
+    match codex_plus_core::provider_import::clear_pending_provider_import_for_id(&import_id) {
         Ok(()) => ok(
             "已取消供应商导入。",
-            PendingProviderImportPayload { pending: None },
+            PendingProviderImportPayload {
+                pending: None,
+                key_changed: None,
+                error: None,
+            },
         ),
-        Err(error) => failed(
-            &format!("取消供应商导入失败：{error}"),
-            PendingProviderImportPayload { pending: None },
+        Err(_) => failed(
+            "取消供应商导入失败，请检查文件权限。",
+            PendingProviderImportPayload {
+                pending: None,
+                key_changed: None,
+                error: None,
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_pending_provider_models(
+    import_id: String,
+) -> CommandResult<PendingProviderModelsPayload> {
+    match codex_plus_core::provider_import::fetch_pending_provider_models(&import_id).await {
+        Ok(models) => ok(
+            &format!("已获取 {} 个上游模型。", models.len()),
+            PendingProviderModelsPayload { models },
+        ),
+        Err(_) => failed(
+            "获取上游模型失败，请在核对地址与 Key 后手动重试。",
+            PendingProviderModelsPayload { models: Vec::new() },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn fetch_pending_provider_billing(
+    import_id: String,
+) -> CommandResult<PendingProviderBillingPayload> {
+    match codex_plus_core::provider_import::fetch_pending_provider_billing(&import_id).await {
+        Ok(info) => {
+            let multiplier = format_multiplier(info.effective_rate_multiplier);
+            ok(
+                &format!("已获取倍率：{multiplier}x。"),
+                PendingProviderBillingPayload { multiplier },
+            )
+        }
+        Err(_) => failed(
+            "获取倍率失败，请在核对地址与 Key 后手动重试。",
+            PendingProviderBillingPayload {
+                multiplier: String::new(),
+            },
         ),
     }
 }

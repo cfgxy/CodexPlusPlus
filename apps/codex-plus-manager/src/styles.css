@@ -1076,6 +1076,26 @@ body {
   scrollbar-gutter: stable;
 }
 
+.provider-import-source,
+.provider-import-fetch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 10px 24px;
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+  overflow-wrap: anywhere;
+}
+
+.provider-import-source { font-size: 12px; color: hsl(var(--muted-foreground)); }
+.provider-import-fetch { justify-content: space-between; font-size: 13px; }
+.provider-import-fetch > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.provider-import-model { padding: 12px 24px; border-bottom: 1px solid hsl(var(--border) / 0.6); }
+.provider-import-model .field { max-width: 420px; }
+.provider-import-fields { margin: 0; padding: 0; border: 0; min-width: 0; }
+.provider-import-page .relay-detail-header { flex-wrap: wrap; padding-block: 8px; }
+.provider-import-page .relay-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 /* 不透明：保存按钮常驻底部，透出下方表单会像渲染错位 */
 .relay-detail-footer {
   display: flex;

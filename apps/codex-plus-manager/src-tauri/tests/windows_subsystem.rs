@@ -73,11 +73,17 @@ fn manager_close_minimizes_to_tray_without_confirmation() {
 fn manager_queues_codexplusplus_provider_urls_for_confirmation_on_startup() {
     let main_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
         .expect("read manager main.rs");
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
 
     assert!(main_rs.contains("codexplusplus://"));
-    assert!(main_rs.contains("provider_import::save_pending_provider_import_from_url"));
+    assert!(main_rs.contains("handle_provider_import_url"));
+    assert!(main_rs.contains("eq_ignore_ascii_case(\"codexplusplus://\")"));
+    assert!(lib_rs.contains("provider_import::save_pending_provider_import_from_url"));
+    assert!(lib_rs.contains("tauri::RunEvent::Opened { urls }"));
+    assert!(lib_rs.contains("handle_provider_import_url(url.as_str())"));
     assert!(!main_rs.contains("provider_import::import_provider_from_url"));
-    assert!(main_rs.contains("manager.provider_import_url.pending"));
+    assert!(lib_rs.contains("manager.provider_import_url.pending"));
 }
 
 #[test]
@@ -231,9 +237,7 @@ fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
     assert!(app_tsx.contains("const createNewAggregateProfile = () =>"));
     assert!(app_tsx.contains("onClick={createNewAggregateProfile}"));
     assert!(app_tsx.contains("已打开聚合供应商详情"));
-    assert!(app_tsx.contains(
-        "requiresOpenAiAuth: profile.relayMode !== \"pureApi\","
-    ));
+    assert!(app_tsx.contains("requiresOpenAiAuth: profile.relayMode !== \"pureApi\","));
     assert!(
         app_tsx.contains(
             "`requires_openai_auth = ${options.requiresOpenAiAuth ? \"true\" : \"false\"}`"
